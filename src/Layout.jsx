@@ -1,197 +1,96 @@
 import { useState, useEffect } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from './supabase';
-import { Link } from 'react-router-dom';
 
-export default function Dashboard({ user }) {
-    const [currentTime, setCurrentTime] = useState('00:00:00');
-    const [stats, setStats] = useState({ total: 0, activeNow: 0, absent: 0, leaves: 0 });
-    const [todaysLog, setTodaysLog] = useState(null);
-    const [workDuration, setWorkDuration] = useState('00h 00m 00s');
-    const [loading, setLoading] = useState(true);
-    const [loadingAction, setLoadingAction] = useState(false);
+export default function Layout({ user, onLogout }) {
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [pendingLeaves, setPendingLeaves] = useState(0);
+    const navigate = useNavigate();
+    const location = useLocation();
 
     const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
 
     useEffect(() => {
-        const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false })), 1000);
-        return () => clearInterval(timer); 
-    }, []);
-
-    useEffect(() => {
-        fetchDashboardData();
-
+        fetchPendingCount();
         if (isAdmin) {
-            const attendanceChannel = supabase
-                .channel('admin-absent-logic-v5')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => fetchDashboardData())
+            const leafChannel = supabase
+                .channel('global-notifications')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchPendingCount())
                 .subscribe();
-
-            const leaveChannel = supabase
-                .channel('admin-leaves-v5')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchDashboardData())
-                .subscribe();
-
-            return () => {
-                supabase.removeChannel(attendanceChannel);
-                supabase.removeChannel(leaveChannel);
-            };
+            return () => supabase.removeChannel(leafChannel);
         }
-    }, [user, isAdmin]);
+    }, [isAdmin]);
 
-    const fetchDashboardData = async () => {
-        const todayStr = new Date().toLocaleDateString('en-CA');
-        try {
-            if (isAdmin) {
-                const [empCount, activeAtt, totalPresentToday, leaveCount] = await Promise.all([
-                    supabase.from('employees').select('*', { count: 'exact', head: true }),
-                    supabase.from('attendance')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('date', todayStr)
-                        .is('time_out', null), // যারা এই মুহূর্তে একটিভ
-                    supabase.from('attendance')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('date', todayStr), // আজকে যারা একবার হলেও ক্লক-ইন করেছে
-                    supabase.from('leaves').select('*', { count: 'exact', head: true }).eq('status', 'Pending')
-                ]);
-
-                const totalStaff = empCount.count || 0;
-                const activeNow = activeAtt.count || 0;
-                const totalWhoClockedIn = totalPresentToday.count || 0;
-                
-                // 🚀 লজিক আপডেট: যারা আজ একদমই ক্লক-ইন করেনি (Absent)
-                const absentToday = Math.max(0, totalStaff - totalWhoClockedIn);
-                
-                setStats({ 
-                    total: totalStaff, 
-                    activeNow, 
-                    absent: absentToday, 
-                    leaves: leaveCount.count || 0 
-                });
-            }
-            const { data: myAtt } = await supabase.from('attendance').select('*').eq('emp_id', user.emp_id).eq('date', todayStr).maybeSingle();
-            setTodaysLog(myAtt || null);
-        } catch (error) { console.error(error); } finally { setLoading(false); }
+    const fetchPendingCount = async () => {
+        const { count } = await supabase.from('leaves').select('*', { count: 'exact', head: true }).eq('status', 'Pending');
+        setPendingLeaves(count || 0);
     };
 
-    useEffect(() => {
-        let interval;
-        if (todaysLog && todaysLog.time_in && !todaysLog.time_out) {
-            const start = new Date(`${todaysLog.date}T${todaysLog.time_in}`);
-            interval = setInterval(() => {
-                const diff = new Date() - start;
-                const h = Math.floor(diff / 3600000);
-                const m = Math.floor((diff % 3600000) / 60000);
-                const s = Math.floor((diff % 60000) / 1000);
-                setWorkDuration(`${h.toString().padStart(2,'0')}h ${m.toString().padStart(2,'0')}m ${s.toString().padStart(2,'0')}s`);
-            }, 1000);
-        } else { setWorkDuration("00h 00m 00s"); }
-        return () => clearInterval(interval);
-    }, [todaysLog]);
-
-    const handleAttendance = async (action) => {
-        setLoadingAction(true);
-        const now = new Date();
-        const dateStr = now.toLocaleDateString('en-CA');
-        const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
-        try {
-            if (action === 'clock_in') {
-                await supabase.from('attendance').insert([{ emp_id: user.emp_id, name: user.name, date: dateStr, time_in: timeStr }]);
-            } else {
-                await supabase.from('attendance').update({ time_out: timeStr }).eq('emp_id', user.emp_id).eq('date', dateStr);
-            }
-            fetchDashboardData(); 
-        } catch (err) { alert("Error!"); } finally { setLoadingAction(false); }
-    };
-
-    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Optimizing Stats...</div>;
+    const navItems = isAdmin ? [
+        { path: '/', icon: 'fa-house', label: 'Dashboard' }, 
+        { path: '/team', icon: 'fa-users', label: 'Staff Force' }, 
+        { path: '/attendance', icon: 'fa-calendar-check', label: 'Attendance' }, 
+        { path: '/leaves', icon: 'fa-paper-plane', label: 'Leaves', badge: pendingLeaves }, 
+        { path: '/payroll', icon: 'fa-sack-dollar', label: 'Payroll' }
+    ] : [
+        { path: '/', icon: 'fa-house', label: 'Home' }, 
+        { path: '/leaves', icon: 'fa-paper-plane', label: 'Leaves' }, 
+        { path: '/payroll', icon: 'fa-sack-dollar', label: 'Payslip' }
+    ];
 
     return (
-        <div className="max-w-7xl mx-auto space-y-10 animate-[fadeIn_0.6s_ease-out] pb-24 px-4">
+        <div className="flex h-screen bg-slate-50 overflow-hidden font-sans relative">
             
-            <style>
-                {`@import url('https://fonts.googleapis.com/css2?family=Imperial+Script&display=swap');`}
-            </style>
+            {/* 📱 মোবাইল মেনু বাটন (সবসময় উপরে থাকবে) */}
+            <button 
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
+                className="lg:hidden fixed bottom-8 right-8 z-[100] w-14 h-14 bg-slate-900 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all"
+            >
+                <i className={`fa-solid ${isSidebarOpen ? 'fa-xmark' : 'fa-bars-staggered'} text-xl`}></i>
+            </button>
 
-            {/* 👑 Hero Welcome Section */}
-            <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.04)] border border-slate-50 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-96 h-96 bg-slate-50 rounded-full -mr-32 -mt-32"></div>
-                <div className="relative z-10 flex flex-col lg:flex-row justify-between items-center gap-12">
-                    <div className="text-center lg:text-left">
-                        <div className="flex items-center justify-center lg:justify-start gap-3 mb-6">
-                            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping"></div>
-                            <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.5em]">Live Operations Monitor</span>
-                        </div>
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 leading-[1.2] tracking-tight">
-                            Assalamu Alaikum,<br/>
-                            <span style={{ fontFamily: "'Imperial Script', cursive", fontWeight: 'normal' }} className="text-slate-600 block mt-2 text-5xl md:text-6xl lg:text-7xl">
-                                {user?.name}
-                            </span>
-                        </h1>
-                    </div>
-                    <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] shadow-2xl min-w-[300px]">
-                        <h2 className="text-5xl font-black tracking-tighter text-white">{currentTime}</h2>
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em] mt-4">System Time</p>
-                    </div>
-                </div>
-            </div>
-
-            {/* 📊 The Four Cards (Absent Logic Updated) */}
-            {isAdmin && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                    <Link to="/team" className="block">
-                        <ExecutiveStat label="Total Staff" value={stats.total} />
-                    </Link>
-                    <Link to="/attendance" className="block">
-                        <ExecutiveStat label="Active Now" value={stats.activeNow} isPositive />
-                    </Link>
-                    <Link to="/attendance" className="block">
-                        <ExecutiveStat label="Absent" value={stats.absent} isNegative />
-                    </Link>
-                    <Link to="/leaves" className="block">
-                        <ExecutiveStat label="Pending Leaves" value={stats.leaves} isWarning />
-                    </Link>
-                </div>
+            {/* মোবাইল ওভারলে */}
+            {isSidebarOpen && (
+                <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 z-[80] bg-slate-900/40 backdrop-blur-sm lg:hidden transition-opacity"></div>
             )}
 
-            {/* ⏱️ Shift Action Area */}
-            <div className="bg-white rounded-[3rem] p-10 md:p-14 border border-slate-100 shadow-sm flex flex-col md:flex-row items-center justify-between gap-12">
-                <div className="flex items-center gap-8">
-                    <div className="w-20 h-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl">
-                        <i className="fa-solid fa-bolt text-2xl text-orange-400"></i>
-                    </div>
-                    <div>
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">My Duty Status</p>
-                        <h2 className="text-4xl font-black text-slate-900 tracking-tighter">{workDuration}</h2>
-                    </div>
+            {/* প্রিমিয়াম সাইডবার */}
+            <aside className={`fixed lg:static inset-y-0 left-0 z-[90] w-72 bg-white border-r border-slate-100 flex flex-col shadow-2xl lg:shadow-none transition-transform duration-300 ease-in-out transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+                <div className="h-28 flex items-center px-10">
+                    <span className="text-xl font-black text-slate-900 tracking-tighter uppercase">Lams Power</span>
                 </div>
                 
-                <div className="w-full md:w-auto">
-                    {!todaysLog ? (
-                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-slate-950 text-white rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl active:scale-[0.97]">
-                            Start Duty
+                <nav className="flex-1 px-6 space-y-2 mt-4 overflow-y-auto">
+                    {navItems.map((item) => (
+                        <button 
+                            key={item.path}
+                            onClick={() => { navigate(item.path); setIsSidebarOpen(false); }} 
+                            className={`flex items-center justify-between w-full p-4 rounded-2xl transition-all ${location.pathname === item.path ? 'bg-slate-900 text-white shadow-xl' : 'text-slate-400 hover:bg-slate-50'}`}
+                        >
+                            <div className="flex items-center gap-4">
+                                <i className={`fa-solid ${item.icon} w-5 text-sm`}></i>
+                                <span className="text-[10px] font-black uppercase tracking-[0.3em]">{item.label}</span>
+                            </div>
+                            {item.badge > 0 && (
+                                <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-lg">
+                                    {item.badge}
+                                </span>
+                            )}
                         </button>
-                    ) : !todaysLog.time_out ? (
-                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-white text-red-600 border-2 border-red-50 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-lg active:scale-[0.97]">
-                            End Duty
-                        </button>
-                    ) : (
-                        <div className="w-full md:w-80 h-16 bg-green-50/50 text-green-700 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] border border-green-100 flex items-center justify-center gap-3">
-                            <i className="fa-solid fa-check-circle"></i> Today's Shift Done
-                        </div>
-                    )}
+                    ))}
+                </nav>
+
+                <div className="p-8 border-t border-slate-50">
+                    <button onClick={onLogout} className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-widest hover:text-red-500 transition-all">
+                        <i className="fa-solid fa-power-off"></i> Logout
+                    </button>
                 </div>
-            </div>
+            </aside>
 
-        </div>
-    );
-}
-
-function ExecutiveStat({ label, value, isPositive, isNegative, isWarning }) {
-    return (
-        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-xl transition-all duration-500 cursor-pointer h-full border-b-4 border-b-transparent hover:border-b-slate-900">
-            <div className={`w-1.5 h-6 rounded-full mb-6 ${isPositive ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : isNegative ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]' : isWarning ? 'bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.4)]' : 'bg-slate-200'}`}></div>
-            <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mb-2">{label}</p>
-            <p className="text-4xl font-black text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
+            {/* মেইন কন্টেন্ট */}
+            <main className="flex-1 overflow-y-auto relative w-full px-6 lg:px-16 pb-20 pt-8">
+                <Outlet />
+            </main>
         </div>
     );
 }
