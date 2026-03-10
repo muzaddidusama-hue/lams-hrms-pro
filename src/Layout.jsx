@@ -22,12 +22,12 @@ export default function Dashboard({ user }) {
 
         if (isAdmin) {
             const attendanceChannel = supabase
-                .channel('admin-live-status')
+                .channel('admin-absent-logic-v5')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => fetchDashboardData())
                 .subscribe();
 
             const leaveChannel = supabase
-                .channel('admin-live-leaves')
+                .channel('admin-leaves-v5')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchDashboardData())
                 .subscribe();
 
@@ -42,23 +42,29 @@ export default function Dashboard({ user }) {
         const todayStr = new Date().toLocaleDateString('en-CA');
         try {
             if (isAdmin) {
-                // 🚀 লজিক আপডেট: শুধুমাত্র যারা ক্লক-আউট করেনি তাদের গুনে বের করা
-                const [empCount, activeAtt, leaveCount] = await Promise.all([
+                const [empCount, activeAtt, totalPresentToday, leaveCount] = await Promise.all([
                     supabase.from('employees').select('*', { count: 'exact', head: true }),
                     supabase.from('attendance')
                         .select('*', { count: 'exact', head: true })
                         .eq('date', todayStr)
-                        .is('time_out', null), // যারা এখনো বের হয়নি (Active Now)
+                        .is('time_out', null), // যারা এই মুহূর্তে একটিভ
+                    supabase.from('attendance')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('date', todayStr), // আজকে যারা একবার হলেও ক্লক-ইন করেছে
                     supabase.from('leaves').select('*', { count: 'exact', head: true }).eq('status', 'Pending')
                 ]);
 
-                const total = empCount.count || 0;
+                const totalStaff = empCount.count || 0;
                 const activeNow = activeAtt.count || 0;
+                const totalWhoClockedIn = totalPresentToday.count || 0;
+                
+                // 🚀 লজিক আপডেট: যারা আজ একদমই ক্লক-ইন করেনি (Absent)
+                const absentToday = Math.max(0, totalStaff - totalWhoClockedIn);
                 
                 setStats({ 
-                    total, 
+                    total: totalStaff, 
                     activeNow, 
-                    absent: Math.max(0, total - activeNow), 
+                    absent: absentToday, 
                     leaves: leaveCount.count || 0 
                 });
             }
@@ -97,7 +103,7 @@ export default function Dashboard({ user }) {
         } catch (err) { alert("Error!"); } finally { setLoadingAction(false); }
     };
 
-    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Syncing Intelligence...</div>;
+    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Optimizing Stats...</div>;
 
     return (
         <div className="max-w-7xl mx-auto space-y-10 animate-[fadeIn_0.6s_ease-out] pb-24 px-4">
@@ -106,7 +112,7 @@ export default function Dashboard({ user }) {
                 {`@import url('https://fonts.googleapis.com/css2?family=Imperial+Script&display=swap');`}
             </style>
 
-            {/* 👑 Hero Section */}
+            {/* 👑 Hero Welcome Section */}
             <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.04)] border border-slate-50 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-slate-50 rounded-full -mr-32 -mt-32"></div>
                 <div className="relative z-10 flex flex-col lg:flex-row justify-between items-center gap-12">
@@ -124,12 +130,12 @@ export default function Dashboard({ user }) {
                     </div>
                     <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] shadow-2xl min-w-[300px]">
                         <h2 className="text-5xl font-black tracking-tighter text-white">{currentTime}</h2>
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em] mt-4">Current Network Time</p>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em] mt-4">System Time</p>
                     </div>
                 </div>
             </div>
 
-            {/* 📊 Executive Stat Cards */}
+            {/* 📊 The Four Cards (Absent Logic Updated) */}
             {isAdmin && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                     <Link to="/team" className="block">
@@ -139,7 +145,7 @@ export default function Dashboard({ user }) {
                         <ExecutiveStat label="Active Now" value={stats.activeNow} isPositive />
                     </Link>
                     <Link to="/attendance" className="block">
-                        <ExecutiveStat label="Not in Duty" value={stats.absent} isNegative />
+                        <ExecutiveStat label="Absent" value={stats.absent} isNegative />
                     </Link>
                     <Link to="/leaves" className="block">
                         <ExecutiveStat label="Pending Leaves" value={stats.leaves} isWarning />
@@ -154,7 +160,7 @@ export default function Dashboard({ user }) {
                         <i className="fa-solid fa-bolt text-2xl text-orange-400"></i>
                     </div>
                     <div>
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Live Shift Session</p>
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">My Duty Status</p>
                         <h2 className="text-4xl font-black text-slate-900 tracking-tighter">{workDuration}</h2>
                     </div>
                 </div>
@@ -162,15 +168,15 @@ export default function Dashboard({ user }) {
                 <div className="w-full md:w-auto">
                     {!todaysLog ? (
                         <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-slate-950 text-white rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl active:scale-[0.97]">
-                            Initiate Duty
+                            Start Duty
                         </button>
                     ) : !todaysLog.time_out ? (
                         <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-white text-red-600 border-2 border-red-50 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-lg active:scale-[0.97]">
-                            Conclude Duty
+                            End Duty
                         </button>
                     ) : (
                         <div className="w-full md:w-80 h-16 bg-green-50/50 text-green-700 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] border border-green-100 flex items-center justify-center gap-3">
-                            <i className="fa-solid fa-check-circle"></i> Shift Finished
+                            <i className="fa-solid fa-check-circle"></i> Today's Shift Done
                         </div>
                     )}
                 </div>
@@ -182,8 +188,8 @@ export default function Dashboard({ user }) {
 
 function ExecutiveStat({ label, value, isPositive, isNegative, isWarning }) {
     return (
-        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-xl transition-all duration-500 cursor-pointer h-full">
-            <div className={`w-1.5 h-6 rounded-full mb-6 ${isPositive ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-200'}`}></div>
+        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-xl transition-all duration-500 cursor-pointer h-full border-b-4 border-b-transparent hover:border-b-slate-900">
+            <div className={`w-1.5 h-6 rounded-full mb-6 ${isPositive ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : isNegative ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.4)]' : isWarning ? 'bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.4)]' : 'bg-slate-200'}`}></div>
             <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mb-2">{label}</p>
             <p className="text-4xl font-black text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
         </div>
