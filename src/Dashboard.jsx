@@ -16,16 +16,28 @@ export default function Dashboard({ user }) {
         return () => clearInterval(timer); 
     }, []);
 
-    useEffect(() => {
-        fetchDashboardData();
-        if (isAdmin) {
-            const channel = supabase.channel('dashboard-sync-unit')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => fetchDashboardData())
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchDashboardData())
-                .subscribe();
-            return () => supabase.removeChannel(channel);
-        }
-    }, [isAdmin]);
+// Dashboard.jsx এর Realtime useEffect অংশটি নিচের মতো করে দিন
+useEffect(() => {
+    fetchDashboardData();
+    if (isAdmin) {
+        // নতুন সাবস্ক্রিপশন চ্যানেল 'live-stats'
+        const channel = supabase.channel('live-stats')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, (payload) => {
+                console.log("Realtime Leave Update:", payload);
+                fetchDashboardData(); // ডাটা রি-ফেচ করবে
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
+                fetchDashboardData();
+            })
+            .subscribe((status) => {
+                console.log("Supabase Status:", status);
+            });
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }
+}, [isAdmin]);
 
     const fetchDashboardData = async () => {
         const todayStr = new Date().toLocaleDateString('en-CA');
