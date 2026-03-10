@@ -67,67 +67,75 @@ export default function Dashboard({ user }) {
         } catch (err) { alert("Error!"); } finally { setLoadingAction(false); }
     };
 
-    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Initializing Core...</div>;
+    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Loading...</div>;
 
     return (
         <div className="max-w-7xl mx-auto space-y-10 animate-[fadeIn_0.6s_ease-out] pb-24 px-4">
             
-            {/* 🌑 Ultra-Minimalist Hero Section */}
-            <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_20px_50px_rgba(0,0,0,0.05)] border border-slate-50 relative overflow-hidden">
+            {/* ফন্ট ইমপোর্ট করার স্টাইল */}
+            <style>
+                {`@import url('https://fonts.googleapis.com/css2?family=Imperial+Script&display=swap');`}
+            </style>
+
+            {/* 🌑 High-End Minimalist Hero Section */}
+            <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.04)] border border-slate-50 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-slate-50 rounded-full -mr-32 -mt-32"></div>
                 <div className="relative z-10 flex flex-col lg:flex-row justify-between items-center gap-12">
                     <div className="text-center lg:text-left">
                         <div className="flex items-center justify-center lg:justify-start gap-3 mb-6">
-                            <div className="w-2 h-2 bg-slate-800 rounded-full animate-ping"></div>
-                            <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.4em]">Internal System v3.0</span>
+                            <div className="w-1.5 h-1.5 bg-slate-900 rounded-full animate-pulse"></div>
+                            <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.5em]">Employee Management</span>
                         </div>
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 leading-[1.1] tracking-tight">
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 leading-[1.2] tracking-tight">
                             Assalamu Alaikum,<br/>
-                            <span className="text-slate-400 font-light italic">{user?.name}</span>
+                            <span style={{ fontFamily: "'Imperial Script', cursive", fontWeight: 'normal' }} className="text-slate-600 block mt-2 text-5xl md:text-6xl lg:text-7xl">
+                                {user?.name}
+                            </span>
                         </h1>
-                        <p className="text-slate-400 text-sm mt-6 font-medium tracking-wide">Lams Power Employee Management Portal</p>
+                        <p className="text-slate-400 text-xs mt-8 font-bold uppercase tracking-[0.2em] opacity-60">Lams Power Corporate Portal</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center p-10 bg-slate-900 rounded-[3rem] shadow-2xl min-w-[280px]">
+                    <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] shadow-2xl min-w-[300px] border-t border-white/5">
                         <h2 className="text-5xl font-black tracking-tighter text-white">{currentTime}</h2>
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] mt-3">Live Clock</p>
+                        <div className="w-8 h-1 bg-slate-700 my-4 rounded-full"></div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em]">Real-time Sync</p>
                     </div>
                 </div>
             </div>
 
-            {/* 📊 High-Definition Admin Stats */}
+            {/* 📊 Executive Stat Cards */}
             {isAdmin && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                    <ExecutiveStat label="Total Staff" value={stats.total} />
-                    <ExecutiveStat label="Present" value={stats.present} isPositive />
-                    <ExecutiveStat label="Absent" value={stats.absent} isNegative />
-                    <ExecutiveStat label="Pending Leaves" value={stats.leaves} isWarning />
+                    <ExecutiveStat label="Staff Force" value={stats.total} />
+                    <ExecutiveStat label="Active Now" value={stats.present} isPositive />
+                    <ExecutiveStat label="Off Duty" value={stats.absent} isNegative />
+                    <ExecutiveStat label="Pending" value={stats.leaves} isWarning />
                 </div>
             )}
 
-            {/* ⏱️ Clean Work Session Area */}
-            <div className="bg-slate-50/50 backdrop-blur-sm rounded-[3rem] p-8 md:p-12 border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-10">
+            {/* ⏱️ Duty Control Hub */}
+            <div className="bg-white rounded-[3rem] p-10 md:p-14 border border-slate-100 shadow-[0_10px_40px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-center justify-between gap-12">
                 <div className="flex items-center gap-8">
-                    <div className="w-20 h-20 bg-white rounded-[2.5rem] flex items-center justify-center text-slate-900 shadow-sm border border-slate-100">
-                        <i className="fa-solid fa-clock-rotate-left text-2xl"></i>
+                    <div className="w-20 h-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl">
+                        <i className="fa-solid fa-hourglass-start text-2xl"></i>
                     </div>
                     <div>
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Session Active</p>
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Shift Duration</p>
                         <h2 className="text-4xl font-black text-slate-900 tracking-tighter">{workDuration}</h2>
                     </div>
                 </div>
                 
                 <div className="w-full md:w-auto">
                     {!todaysLog ? (
-                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full md:w-72 h-16 bg-slate-900 text-white rounded-[1.5rem] font-black text-xs uppercase tracking-[0.2em] shadow-2xl hover:bg-slate-800 transition-all active:scale-[0.98]">
-                            Start Duty
+                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-slate-950 text-white rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl hover:bg-slate-800 transition-all active:scale-[0.97]">
+                            Initiate Duty
                         </button>
                     ) : !todaysLog.time_out ? (
-                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-72 h-16 bg-white text-red-600 border border-red-100 rounded-[1.5rem] font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:bg-red-50 transition-all active:scale-[0.98]">
-                            End Duty
+                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-white text-red-600 border-2 border-red-50 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-lg hover:bg-red-50 transition-all active:scale-[0.97]">
+                            Conclude Duty
                         </button>
                     ) : (
-                        <div className="w-full md:w-72 h-16 bg-green-50 text-green-700 rounded-[1.5rem] font-black text-xs uppercase tracking-[0.2em] border border-green-100 flex items-center justify-center gap-3">
-                            <i className="fa-solid fa-check-double"></i> Shift Completed
+                        <div className="w-full md:w-80 h-16 bg-green-50/50 text-green-700 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] border border-green-100 flex items-center justify-center gap-3">
+                            <i className="fa-solid fa-shield-check"></i> Shift Finished
                         </div>
                     )}
                 </div>
@@ -139,9 +147,9 @@ export default function Dashboard({ user }) {
 
 function ExecutiveStat({ label, value, isPositive, isNegative, isWarning }) {
     return (
-        <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-50 flex flex-col items-start group hover:shadow-md transition-all duration-300">
-            <div className={`w-1 h-8 rounded-full mb-6 ${isPositive ? 'bg-green-500' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-300'}`}></div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{label}</p>
+        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-lg transition-all duration-500">
+            <div className={`w-1.5 h-6 rounded-full mb-6 ${isPositive ? 'bg-green-500' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-200'}`}></div>
+            <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mb-2">{label}</p>
             <p className="text-4xl font-black text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
         </div>
     );
