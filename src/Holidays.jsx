@@ -1,72 +1,62 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-export default function Holidays() {
+export default function Holidays({ user }) {
     const [holidays, setHolidays] = useState([]);
+    const [occasion, setOccasion] = useState('');
+    const [date, setDate] = useState('');
     const [loading, setLoading] = useState(false);
-    
-    const [hDate, setHDate] = useState('');
-    const [hName, setHName] = useState('');
 
-    useEffect(() => {
-        fetchHolidays();
-    }, []);
+    const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
+
+    useEffect(() => { fetchHolidays(); }, []);
 
     const fetchHolidays = async () => {
-        setLoading(true);
         const { data } = await supabase.from('holidays').select('*').order('date', { ascending: true });
-        if (data) setHolidays(data);
-        setLoading(false);
+        setHolidays(data || []);
     };
 
     const handleAddHoliday = async (e) => {
         e.preventDefault();
-        try {
-            await supabase.from('holidays').insert([{ date: hDate, occasion: hName }]);
-            setHDate(''); setHName('');
-            fetchHolidays();
-            alert("Holiday Added! 🌴");
-        } catch (error) {
-            alert("Error adding holiday");
-        }
+        setLoading(true);
+        const { error } = await supabase.from('holidays').insert([{ occasion, date }]);
+        if (error) alert(error.message);
+        else { setOccasion(''); setDate(''); fetchHolidays(); }
+        setLoading(false);
+    };
+
+    const deleteHoliday = async (id) => {
+        if (!confirm("Remove this holiday?")) return;
+        await supabase.from('holidays').delete().eq('id', id);
+        fetchHolidays();
     };
 
     return (
-        <div className="max-w-4xl mx-auto space-y-8 animate-[fadeIn_0.4s_ease-out]">
-            
-            {/* Add Holiday Box */}
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-                <h3 className="text-2xl font-extrabold text-slate-900 tracking-tight mb-6">Add New Holiday</h3>
-                <form onSubmit={handleAddHoliday} className="flex flex-col md:flex-row gap-4">
-                    <input type="date" required value={hDate} onChange={e => setHDate(e.target.value)} className="flex-1 p-4 rounded-xl bg-slate-50 border border-slate-200 font-bold text-sm outline-none focus:border-orange-500 transition-all cursor-pointer" />
-                    <input type="text" required placeholder="Occasion Name" value={hName} onChange={e => setHName(e.target.value)} className="flex-[2] p-4 rounded-xl bg-slate-50 border border-slate-200 font-bold text-sm outline-none focus:border-orange-500 transition-all" />
-                    <button type="submit" className="bg-slate-900 text-white px-8 py-4 rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg active:scale-95 transition-all">Add Holiday</button>
+        <div className="max-w-4xl mx-auto space-y-10 animate-[fadeIn_0.5s_ease-out]">
+            <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Holiday Management</h1>
+            {isAdmin && (
+                <form onSubmit={handleAddHoliday} className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4">
+                    <input type="text" placeholder="Occasion" value={occasion} onChange={e => setOccasion(e.target.value)} required className="flex-1 p-4 bg-slate-50 rounded-2xl border-none text-sm font-bold focus:ring-2 focus:ring-slate-900" />
+                    <input type="date" value={date} onChange={e => setDate(e.target.value)} required className="p-4 bg-slate-50 rounded-2xl border-none text-sm font-bold focus:ring-2 focus:ring-slate-900" />
+                    <button disabled={loading} className="bg-slate-950 text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:scale-105 transition-all">Add Holiday</button>
                 </form>
-            </div>
-
-            {/* Holiday List */}
-            <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-                <h3 className="text-xl font-bold text-slate-900 mb-6">Upcoming Holidays</h3>
-                {loading ? (
-                    <div className="p-10 text-center"><div className="border-4 border-slate-200 border-t-orange-500 rounded-full w-8 h-8 animate-spin mx-auto"></div></div>
-                ) : (
-                    <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                        {holidays.map((h, i) => (
-                            <div key={i} className="flex items-center justify-between p-5 bg-slate-50 border border-slate-100 rounded-2xl hover:border-orange-200 transition-colors">
-                                <div>
-                                    <p className="font-bold text-slate-800 text-sm">{h.occasion}</p>
-                                    <p className="text-xs text-slate-500 font-medium mt-1">{new Date(h.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-                                </div>
-                                <div className="w-10 h-10 rounded-full bg-orange-100 text-orange-500 flex items-center justify-center">
-                                    <i className="fa-solid fa-calendar-day"></i>
-                                </div>
-                            </div>
+            )}
+            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+                <table className="w-full text-left">
+                    <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                        <tr><th className="p-6">Occasion</th><th className="p-6">Date</th>{isAdmin && <th className="p-6 text-right">Action</th>}</tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                        {holidays.map(h => (
+                            <tr key={h.id} className="hover:bg-slate-50 transition-all font-bold">
+                                <td className="p-6 text-slate-800">{h.occasion}</td>
+                                <td className="p-6 text-slate-500">{new Date(h.date).toLocaleDateString()}</td>
+                                {isAdmin && <td className="p-6 text-right"><button onClick={() => deleteHoliday(h.id)} className="text-red-400 hover:text-red-600"><i className="fa-solid fa-trash-can"></i></button></td>}
+                            </tr>
                         ))}
-                        {holidays.length === 0 && <p className="text-center text-slate-400 text-sm font-bold tracking-widest uppercase py-8">No holidays found.</p>}
-                    </div>
-                )}
+                    </tbody>
+                </table>
             </div>
-            
         </div>
     );
 }
