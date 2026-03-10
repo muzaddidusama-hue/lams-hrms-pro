@@ -53,6 +53,7 @@ export default function App() {
           <Route path="payroll" element={<Payroll user={user} />} />
           <Route path="leaves" element={<Leaves user={user} />} />
           <Route path="attendance" element={<Attendance />} />
+<Route path="notices" element={<Notices user={user} />} />
 <Route path="holidays" element={<Holidays />} />
           <Route path="*" element={
             <div className="text-center p-20 animate-[fadeIn_0.4s_ease-out]">
