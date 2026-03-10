@@ -7,12 +7,10 @@ export default function Layout({ user, onLogout }) {
     const [unreadNotices, setUnreadNotices] = useState(0);
     const navigate = useNavigate();
     const location = useLocation();
-
     const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
 
     useEffect(() => {
-        // নতুন নোটিশের জন্য রিয়েল-টাইম লিসেনার
-        const channel = supabase.channel('notices-db')
+        const channel = supabase.channel('global-notices')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notices' }, () => {
                 setUnreadNotices(prev => prev + 1);
             })
@@ -34,7 +32,7 @@ export default function Layout({ user, onLogout }) {
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden font-sans relative">
             <aside className={`fixed lg:static inset-y-0 left-0 z-[90] w-72 bg-white border-r border-slate-100 flex flex-col transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-                <div className="h-28 flex items-center px-10"><span className="text-xl font-black text-slate-950 tracking-tighter uppercase italic">Lams Power</span></div>
+                <div className="h-28 flex items-center px-10"><span className="text-xl font-black text-slate-950 uppercase tracking-tighter italic">Lams Power</span></div>
                 <nav className="flex-1 px-6 space-y-2 overflow-y-auto">
                     {navItems.map((item) => (
                         <button key={item.path} onClick={() => { navigate(item.path); setIsSidebarOpen(false); if(item.label === 'Noticeboard') setUnreadNotices(0); }} className={`flex items-center justify-between w-full p-4 rounded-2xl transition-all ${location.pathname === item.path ? 'bg-slate-950 text-white shadow-xl' : 'text-slate-400 hover:bg-slate-50'}`}>
