@@ -1,161 +1,191 @@
 import { useState, useEffect } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from './supabase';
+import { Link } from 'react-router-dom';
 
-export default function Layout({ user, onLogout }) {
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [pendingLeaves, setPendingLeaves] = useState(0);
-    const [toastMsg, setToastMsg] = useState('');
-    
-    const navigate = useNavigate();
-    const location = useLocation();
+export default function Dashboard({ user }) {
+    const [currentTime, setCurrentTime] = useState('00:00:00');
+    const [stats, setStats] = useState({ total: 0, activeNow: 0, absent: 0, leaves: 0 });
+    const [todaysLog, setTodaysLog] = useState(null);
+    const [workDuration, setWorkDuration] = useState('00h 00m 00s');
+    const [loading, setLoading] = useState(true);
+    const [loadingAction, setLoadingAction] = useState(false);
 
     const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
 
     useEffect(() => {
-        // শুরুতে ডাটা নিয়ে আসা
-        fetchPendingCount();
+        const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false })), 1000);
+        return () => clearInterval(timer); 
+    }, []);
+
+    useEffect(() => {
+        fetchDashboardData();
 
         if (isAdmin) {
-            // 🚀 সুপার আপডেট: সব ধরনের চেঞ্জ (Insert, Update, Delete) মনিটর করবে
-            const leafChannel = supabase
-                .channel('realtime-nav-badge')
-                .on('postgres_changes', { 
-                    event: '*', 
-                    schema: 'public', 
-                    table: 'leaves' 
-                }, (payload) => {
-                    // যদি নতুন রিকোয়েস্ট আসে তবে টোস্ট মেসেজ দেখাবে
-                    if (payload.eventType === 'INSERT' && payload.new.status === 'Pending') {
-                        showToast(`🔔 New Leave Request from ${payload.new.name}!`);
-                        // নোটিফিকেশন সাউন্ড
-                        new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play().catch(() => {});
-                    }
-                    // ডাটাবেজে যেকোনো চেঞ্জ হলে ব্যাজ আপডেট করবে
-                    fetchPendingCount();
-                })
+            const attendanceChannel = supabase
+                .channel('admin-live-status')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => fetchDashboardData())
                 .subscribe();
 
-            return () => supabase.removeChannel(leafChannel);
+            const leaveChannel = supabase
+                .channel('admin-live-leaves')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchDashboardData())
+                .subscribe();
+
+            return () => {
+                supabase.removeChannel(attendanceChannel);
+                supabase.removeChannel(leaveChannel);
+            };
         }
-    }, [isAdmin]);
+    }, [user, isAdmin]);
 
-    const fetchPendingCount = async () => {
-        const { count } = await supabase
-            .from('leaves')
-            .select('*', { count: 'exact', head: true })
-            .eq('status', 'Pending');
-        setPendingLeaves(count || 0);
+    const fetchDashboardData = async () => {
+        const todayStr = new Date().toLocaleDateString('en-CA');
+        try {
+            if (isAdmin) {
+                // 🚀 লজিক আপডেট: শুধুমাত্র যারা ক্লক-আউট করেনি তাদের গুনে বের করা
+                const [empCount, activeAtt, leaveCount] = await Promise.all([
+                    supabase.from('employees').select('*', { count: 'exact', head: true }),
+                    supabase.from('attendance')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('date', todayStr)
+                        .is('time_out', null), // যারা এখনো বের হয়নি (Active Now)
+                    supabase.from('leaves').select('*', { count: 'exact', head: true }).eq('status', 'Pending')
+                ]);
+
+                const total = empCount.count || 0;
+                const activeNow = activeAtt.count || 0;
+                
+                setStats({ 
+                    total, 
+                    activeNow, 
+                    absent: Math.max(0, total - activeNow), 
+                    leaves: leaveCount.count || 0 
+                });
+            }
+            const { data: myAtt } = await supabase.from('attendance').select('*').eq('emp_id', user.emp_id).eq('date', todayStr).maybeSingle();
+            setTodaysLog(myAtt || null);
+        } catch (error) { console.error(error); } finally { setLoading(false); }
     };
 
-    const showToast = (msg) => {
-        setToastMsg(msg);
-        setTimeout(() => setToastMsg(''), 5000);
+    useEffect(() => {
+        let interval;
+        if (todaysLog && todaysLog.time_in && !todaysLog.time_out) {
+            const start = new Date(`${todaysLog.date}T${todaysLog.time_in}`);
+            interval = setInterval(() => {
+                const diff = new Date() - start;
+                const h = Math.floor(diff / 3600000);
+                const m = Math.floor((diff % 3600000) / 60000);
+                const s = Math.floor((diff % 60000) / 1000);
+                setWorkDuration(`${h.toString().padStart(2,'0')}h ${m.toString().padStart(2,'0')}m ${s.toString().padStart(2,'0')}s`);
+            }, 1000);
+        } else { setWorkDuration("00h 00m 00s"); }
+        return () => clearInterval(interval);
+    }, [todaysLog]);
+
+    const handleAttendance = async (action) => {
+        setLoadingAction(true);
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-CA');
+        const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+        try {
+            if (action === 'clock_in') {
+                await supabase.from('attendance').insert([{ emp_id: user.emp_id, name: user.name, date: dateStr, time_in: timeStr }]);
+            } else {
+                await supabase.from('attendance').update({ time_out: timeStr }).eq('emp_id', user.emp_id).eq('date', dateStr);
+            }
+            fetchDashboardData(); 
+        } catch (err) { alert("Error!"); } finally { setLoadingAction(false); }
     };
 
-    const navItems = isAdmin ? [
-        { path: '/', icon: 'fa-house', label: 'Dashboard' }, 
-        { path: '/team', icon: 'fa-users', label: 'Team Directory' }, 
-        { path: '/attendance', icon: 'fa-calendar-check', label: 'Attendance Log' }, 
-        { path: '/leaves', icon: 'fa-paper-plane', label: 'Leave Requests', badge: pendingLeaves }, 
-        { path: '/payroll', icon: 'fa-sack-dollar', label: 'Payroll' }, 
-        { path: '/holidays', icon: 'fa-calendar-plus', label: 'Holidays' },
-        { path: '/profile', icon: 'fa-gear', label: 'Settings' }
-    ] : [
-        { path: '/', icon: 'fa-house', label: 'Home' }, 
-        { path: '/leaves', icon: 'fa-paper-plane', label: 'My Leaves' }, 
-        { path: '/payroll', icon: 'fa-sack-dollar', label: 'My Payslip' }, 
-        { path: '/profile', icon: 'fa-user', label: 'My Profile' }
-    ];
+    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Syncing Intelligence...</div>;
 
     return (
-        <div className="flex h-screen overflow-hidden bg-white font-sans text-slate-600 antialiased relative">
+        <div className="max-w-7xl mx-auto space-y-10 animate-[fadeIn_0.6s_ease-out] pb-24 px-4">
             
-            {/* 🔔 লাইভ টোস্ট নোটিফিকেশন */}
-            {toastMsg && (
-                <div className="fixed top-6 right-6 z-[100] bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-[slideInRight_0.4s_ease-out] border border-white/10 backdrop-blur-md">
-                    <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
-                    <p className="font-bold text-xs tracking-widest uppercase">{toastMsg}</p>
+            <style>
+                {`@import url('https://fonts.googleapis.com/css2?family=Imperial+Script&display=swap');`}
+            </style>
+
+            {/* 👑 Hero Section */}
+            <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.04)] border border-slate-50 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-96 h-96 bg-slate-50 rounded-full -mr-32 -mt-32"></div>
+                <div className="relative z-10 flex flex-col lg:flex-row justify-between items-center gap-12">
+                    <div className="text-center lg:text-left">
+                        <div className="flex items-center justify-center lg:justify-start gap-3 mb-6">
+                            <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-ping"></div>
+                            <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.5em]">Live Operations Monitor</span>
+                        </div>
+                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 leading-[1.2] tracking-tight">
+                            Assalamu Alaikum,<br/>
+                            <span style={{ fontFamily: "'Imperial Script', cursive", fontWeight: 'normal' }} className="text-slate-600 block mt-2 text-5xl md:text-6xl lg:text-7xl">
+                                {user?.name}
+                            </span>
+                        </h1>
+                    </div>
+                    <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] shadow-2xl min-w-[300px]">
+                        <h2 className="text-5xl font-black tracking-tighter text-white">{currentTime}</h2>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em] mt-4">Current Network Time</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* 📊 Executive Stat Cards */}
+            {isAdmin && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                    <Link to="/team" className="block">
+                        <ExecutiveStat label="Total Staff" value={stats.total} />
+                    </Link>
+                    <Link to="/attendance" className="block">
+                        <ExecutiveStat label="Active Now" value={stats.activeNow} isPositive />
+                    </Link>
+                    <Link to="/attendance" className="block">
+                        <ExecutiveStat label="Not in Duty" value={stats.absent} isNegative />
+                    </Link>
+                    <Link to="/leaves" className="block">
+                        <ExecutiveStat label="Pending Leaves" value={stats.leaves} isWarning />
+                    </Link>
                 </div>
             )}
 
-            {/* মোবাইল সাইডবার ওভারলে */}
-            {isSidebarOpen && (
-                <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm lg:hidden transition-opacity"></div>
-            )}
-
-            {/* 📱 প্রিমিয়াম সাইডবার */}
-            <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white flex flex-col border-r border-slate-100 shadow-2xl transition-transform duration-300 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:static`}>
-                <div className="h-24 flex items-center px-8">
-                    <div className="w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center mr-3 shadow-lg shadow-slate-200">
-                        <i className="fa-solid fa-bolt text-white text-sm"></i>
+            {/* ⏱️ Shift Action Area */}
+            <div className="bg-white rounded-[3rem] p-10 md:p-14 border border-slate-100 shadow-sm flex flex-col md:flex-row items-center justify-between gap-12">
+                <div className="flex items-center gap-8">
+                    <div className="w-20 h-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl">
+                        <i className="fa-solid fa-bolt text-2xl text-orange-400"></i>
                     </div>
-                    <span className="text-xl font-black text-slate-900 tracking-tighter uppercase">Lams Power</span>
+                    <div>
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Live Shift Session</p>
+                        <h2 className="text-4xl font-black text-slate-900 tracking-tighter">{workDuration}</h2>
+                    </div>
                 </div>
                 
-                <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto scrollbar-hide">
-                    {navItems.map((item) => (
-                        <button 
-                            key={item.path}
-                            onClick={() => { navigate(item.path); setIsSidebarOpen(false); }} 
-                            className={`group flex items-center justify-between w-full p-4 rounded-2xl transition-all duration-300 ${location.pathname === item.path ? 'bg-slate-900 text-white shadow-xl translate-x-1' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-900'}`}
-                        >
-                            <div className="flex items-center gap-4">
-                                <i className={`fa-solid ${item.icon} w-5 text-center text-sm ${location.pathname === item.path ? 'text-white' : 'group-hover:text-slate-900'}`}></i>
-                                <span className="text-[10px] font-black uppercase tracking-[0.2em]">{item.label}</span>
-                            </div>
-                            {item.badge > 0 && (
-                                <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-md animate-bounce">
-                                    {item.badge}
-                                </span>
-                            )}
+                <div className="w-full md:w-auto">
+                    {!todaysLog ? (
+                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-slate-950 text-white rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl active:scale-[0.97]">
+                            Initiate Duty
                         </button>
-                    ))}
-                </nav>
-
-                <div className="p-6 border-t border-slate-50">
-                    <button onClick={onLogout} className="flex items-center gap-4 w-full p-4 rounded-2xl text-slate-400 hover:bg-red-50 hover:text-red-600 transition-all text-[10px] font-black uppercase tracking-[0.2em]">
-                        <i className="fa-solid fa-power-off"></i> Logout
-                    </button>
-                </div>
-            </aside>
-
-            {/* 🚀 মেইন কন্টেন্ট এরিয়া */}
-            <main className="flex-1 flex flex-col overflow-hidden relative w-full bg-slate-50/30">
-                <header className="h-20 md:h-24 flex items-center justify-between px-6 lg:px-12 sticky top-0 z-30">
-                    <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden w-12 h-12 bg-white border border-slate-100 rounded-2xl flex items-center justify-center text-slate-900 shadow-sm active:scale-90 transition-all">
-                        <i className="fa-solid fa-bars-staggered"></i>
-                    </button>
-                    
-                    <div className="hidden lg:block">
-                        <h2 className="text-sm font-black text-slate-300 uppercase tracking-[0.4em]">Corporate Management System</h2>
-                    </div>
-
-                    <div onClick={() => navigate('/profile')} className="flex items-center gap-4 p-1.5 pr-4 bg-white border border-slate-100 rounded-2xl shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95">
-                        <img 
-                            src={user?.photo || `https://ui-avatars.com/api/?name=${user?.name}&background=0f172a&color=fff`} 
-                            className="w-10 h-10 md:w-12 md:h-12 rounded-xl object-cover border-2 border-slate-50 shadow-inner" 
-                        />
-                        <div className="hidden md:block">
-                            <h2 className="font-black text-slate-900 text-xs tracking-tight">{user?.name?.split(' ')[0]}</h2>
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{user?.role}</p>
+                    ) : !todaysLog.time_out ? (
+                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-white text-red-600 border-2 border-red-50 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-lg active:scale-[0.97]">
+                            Conclude Duty
+                        </button>
+                    ) : (
+                        <div className="w-full md:w-80 h-16 bg-green-50/50 text-green-700 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] border border-green-100 flex items-center justify-center gap-3">
+                            <i className="fa-solid fa-check-circle"></i> Shift Finished
                         </div>
-                    </div>
-                </header>
-
-                <div className="flex-1 overflow-y-auto px-6 lg:px-12 pb-20 pt-4">
-                    <Outlet /> 
+                    )}
                 </div>
-            </main>
+            </div>
 
-            <style>{`
-                @keyframes slideInRight { 
-                    from { transform: translateX(100%); opacity: 0; } 
-                    to { transform: translateX(0); opacity: 1; } 
-                }
-                .scrollbar-hide::-webkit-scrollbar { display: none; }
-                .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-            `}</style>
+        </div>
+    );
+}
+
+function ExecutiveStat({ label, value, isPositive, isNegative, isWarning }) {
+    return (
+        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-xl transition-all duration-500 cursor-pointer h-full">
+            <div className={`w-1.5 h-6 rounded-full mb-6 ${isPositive ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-200'}`}></div>
+            <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mb-2">{label}</p>
+            <p className="text-4xl font-black text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
         </div>
     );
 }
