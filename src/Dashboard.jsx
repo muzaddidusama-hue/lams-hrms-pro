@@ -67,56 +67,68 @@ export default function Dashboard({ user }) {
         } catch (err) { alert("Error!"); } finally { setLoadingAction(false); }
     };
 
-    if (loading) return <div className="p-20 text-center font-bold text-slate-400 animate-pulse">LOADING...</div>;
+    if (loading) return <div className="p-20 text-center font-bold text-slate-400 animate-pulse uppercase tracking-[0.2em]">Authenticating Portal...</div>;
 
     return (
-        <div className="max-w-7xl mx-auto space-y-6 animate-[fadeIn_0.4s_ease-out] pb-20 px-2">
+        <div className="max-w-7xl mx-auto space-y-8 animate-[fadeIn_0.5s_ease-out] pb-24 px-4">
             
-            {/* 👑 Welcome & Clock Hero Section */}
-            <div className="bg-slate-900 rounded-[2.5rem] p-8 md:p-12 text-white relative overflow-hidden shadow-2xl">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/20 rounded-full blur-[80px] -mr-20 -mt-20"></div>
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-8">
-                    <div className="text-center md:text-left">
-                        <span className="bg-white/10 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-orange-400">Workspace Overview</span>
-                        <h1 className="text-3xl md:text-5xl font-black mt-4 tracking-tight">Welcome, {user?.name?.split(' ')[0]}!</h1>
-                        <p className="text-slate-400 text-sm mt-2 font-medium">Manage your workspace and track productivity.</p>
-                    </div>
-                    <div className="bg-white/5 backdrop-blur-md p-6 rounded-[2rem] border border-white/10 text-center min-w-[200px]">
-                        <h2 className="text-4xl font-black tracking-tighter">{currentTime}</h2>
-                        <p className="text-[10px] font-bold text-orange-500 uppercase tracking-widest mt-1">Live Server Time</p>
+            {/* 💎 Premium Hero Section */}
+            <div className="relative p-1 bg-gradient-to-r from-orange-400 to-orange-600 rounded-[3rem] shadow-2xl">
+                <div className="bg-slate-950 rounded-[2.9rem] p-10 md:p-14 text-white overflow-hidden relative">
+                    <div className="absolute -top-20 -right-20 w-80 h-80 bg-orange-500 opacity-20 blur-[100px]"></div>
+                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-10">
+                        <div className="text-center md:text-left">
+                            <p className="text-orange-400 font-black text-[10px] uppercase tracking-[0.3em] mb-4">Lams Power HQ</p>
+                            <h1 className="text-4xl md:text-6xl font-black tracking-tight leading-tight">
+                                Assalamu Alaikum,<br/>
+                                <span className="bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">{user?.name?.split(' ')[0]}</span>
+                            </h1>
+                        </div>
+                        <div className="flex flex-col items-center justify-center p-8 bg-white/5 border border-white/10 rounded-[2.5rem] backdrop-blur-xl shadow-inner min-w-[240px]">
+                            <h2 className="text-5xl font-black tracking-tighter text-white">{currentTime}</h2>
+                            <div className="h-0.5 w-12 bg-orange-500 my-4"></div>
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Standard Time</p>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            {/* 📊 High-End Admin Stats Card */}
+            {/* 📊 Admin Status Cards (No-Scroll Grid) */}
             {isAdmin && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <ModernStatBox label="Total Staff" value={stats.total} icon="fa-users" color="orange" />
-                    <ModernStatBox label="Present" value={stats.present} icon="fa-user-check" color="green" />
-                    <ModernStatBox label="Absent" value={stats.absent} icon="fa-user-xmark" color="red" />
-                    <ModernStatBox label="Pending" value={stats.leaves} icon="fa-envelope-open-text" color="blue" />
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                    <StatCard label="Total Staff" value={stats.total} icon="fa-users" accent="bg-blue-500" />
+                    <StatCard label="In Office" value={stats.present} icon="fa-user-check" accent="bg-green-500" />
+                    <StatCard label="Off-Duty" value={stats.absent} icon="fa-user-xmark" accent="bg-red-500" />
+                    <StatCard label="Pending" value={stats.leaves} icon="fa-inbox" accent="bg-orange-500" />
                 </div>
             )}
 
-            {/* 🕒 Work Session Section */}
-            <div className="bg-white rounded-[2.5rem] p-8 shadow-xl border border-slate-50 flex flex-col md:flex-row items-center justify-between gap-8">
-                <div className="flex items-center gap-6">
-                    <div className="w-16 h-16 bg-slate-50 rounded-3xl flex items-center justify-center text-slate-800 shadow-inner">
-                        <i className="fa-solid fa-stopwatch text-2xl"></i>
+            {/* 🕒 Work Session & Action */}
+            <div className="bg-white rounded-[3rem] p-10 shadow-2xl border border-slate-100 flex flex-col md:flex-row items-center justify-between gap-10">
+                <div className="flex items-center gap-8">
+                    <div className="w-20 h-20 bg-slate-50 rounded-[2rem] flex items-center justify-center text-slate-800 shadow-xl border border-slate-100">
+                        <i className="fa-solid fa-bolt-lightning text-3xl text-orange-500"></i>
                     </div>
                     <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Session</p>
-                        <h2 className="text-3xl font-black text-slate-800 tracking-tighter">{workDuration}</h2>
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1">Session Duration</p>
+                        <h2 className="text-4xl font-black text-slate-900 tracking-tighter">{workDuration}</h2>
                     </div>
                 </div>
                 
                 <div className="w-full md:w-auto">
                     {!todaysLog ? (
-                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full bg-slate-900 text-white px-12 py-4 rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-slate-800 active:scale-95 transition-all">Clock In</button>
+                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="group relative w-full md:w-64 h-16 bg-slate-950 text-white rounded-2xl font-black text-xs uppercase overflow-hidden transition-all active:scale-95">
+                            <span className="relative z-10">Initialize Clock In</span>
+                            <div className="absolute inset-0 bg-orange-500 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                        </button>
                     ) : !todaysLog.time_out ? (
-                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full bg-red-500 text-white px-12 py-4 rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-red-600 active:scale-95 transition-all">Clock Out</button>
+                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-64 h-16 bg-red-600 text-white rounded-2xl font-black text-xs uppercase shadow-xl hover:bg-red-700 active:scale-95 transition-all">
+                            Terminate Shift
+                        </button>
                     ) : (
-                        <div className="bg-green-50 text-green-600 px-12 py-4 rounded-2xl font-black text-xs uppercase border border-green-100 text-center">Shift Finished</div>
+                        <div className="w-full md:w-64 h-16 bg-green-50 text-green-600 rounded-2xl font-black text-xs uppercase border-2 border-green-100 flex items-center justify-center gap-2">
+                            <i className="fa-solid fa-circle-check"></i> Day Completed
+                        </div>
                     )}
                 </div>
             </div>
@@ -125,20 +137,14 @@ export default function Dashboard({ user }) {
     );
 }
 
-function ModernStatBox({ label, value, icon, color }) {
-    const colors = {
-        orange: "text-orange-500 bg-orange-50",
-        green: "text-green-600 bg-green-50",
-        red: "text-red-500 bg-red-50",
-        blue: "text-blue-500 bg-blue-50"
-    };
+function StatCard({ label, value, icon, accent }) {
     return (
-        <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center text-center group hover:shadow-md transition-all">
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110 ${colors[color]}`}>
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-100 group transition-all hover:-translate-y-1">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-6 shadow-lg ${accent} text-white`}>
                 <i className={`fa-solid ${icon} text-lg`}></i>
             </div>
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
-            <p className="text-2xl font-black text-slate-800 tracking-tight">{value}</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{label}</p>
+            <p className="text-3xl font-black text-slate-900 tracking-tight">{value.toString().padStart(2, '0')}</p>
         </div>
     );
 }
