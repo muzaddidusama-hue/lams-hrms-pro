@@ -12,39 +12,45 @@ export default function Layout({ user, onLogout }) {
 
     const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
 
-    // 🚀 লাইভ ডাটাবেজ লিসেনার (ম্যাজিক!)
     useEffect(() => {
-        if (isAdmin) {
-            // শুরুতে কয়টা পেন্ডিং ছুটি আছে তা গোনা
-            fetchPendingCount();
+        // শুরুতে ডাটা নিয়ে আসা
+        fetchPendingCount();
 
-            // Supabase Realtime: কেউ নতুন লিভ রিকোয়েস্ট করলে সাথে সাথে ধরবে
-            const channel = supabase
-                .channel('realtime-leaves')
-                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leaves' }, (payload) => {
-                    if (payload.new.status === 'Pending') {
-                        setPendingLeaves(prev => prev + 1); // ব্যাজ +১ হবে
-                        showToast(`🔔 New Leave Request from ${payload.new.name}!`); // পপআপ দেখাবে
-                        
-                        // একটি ছোট্ট সাউন্ড প্লে হবে (অপশনাল)
-                        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-                        audio.play().catch(e => console.log(e));
+        if (isAdmin) {
+            // 🚀 সুপার আপডেট: সব ধরনের চেঞ্জ (Insert, Update, Delete) মনিটর করবে
+            const leafChannel = supabase
+                .channel('realtime-nav-badge')
+                .on('postgres_changes', { 
+                    event: '*', 
+                    schema: 'public', 
+                    table: 'leaves' 
+                }, (payload) => {
+                    // যদি নতুন রিকোয়েস্ট আসে তবে টোস্ট মেসেজ দেখাবে
+                    if (payload.eventType === 'INSERT' && payload.new.status === 'Pending') {
+                        showToast(`🔔 New Leave Request from ${payload.new.name}!`);
+                        // নোটিফিকেশন সাউন্ড
+                        new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play().catch(() => {});
                     }
+                    // ডাটাবেজে যেকোনো চেঞ্জ হলে ব্যাজ আপডেট করবে
+                    fetchPendingCount();
                 })
                 .subscribe();
 
-            return () => supabase.removeChannel(channel);
+            return () => supabase.removeChannel(leafChannel);
         }
     }, [isAdmin]);
 
     const fetchPendingCount = async () => {
-        const { count } = await supabase.from('leaves').select('*', { count: 'exact', head: true }).eq('status', 'Pending');
+        const { count } = await supabase
+            .from('leaves')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'Pending');
         setPendingLeaves(count || 0);
     };
 
     const showToast = (msg) => {
         setToastMsg(msg);
-        setTimeout(() => setToastMsg(''), 5000); // ৫ সেকেন্ড পর পপআপ চলে যাবে
+        setTimeout(() => setToastMsg(''), 5000);
     };
 
     const navItems = isAdmin ? [
@@ -62,84 +68,94 @@ export default function Layout({ user, onLogout }) {
         { path: '/profile', icon: 'fa-user', label: 'My Profile' }
     ];
 
-    const getPageTitle = () => {
-        const item = navItems.find(i => i.path === location.pathname);
-        return item ? item.label : 'LAMS HR';
-    };
-
     return (
-        <div className="flex h-screen overflow-hidden bg-slate-50 font-sans text-slate-600 antialiased relative">
+        <div className="flex h-screen overflow-hidden bg-white font-sans text-slate-600 antialiased relative">
             
-            {/* Live Popup Notification (Toast) */}
+            {/* 🔔 লাইভ টোস্ট নোটিফিকেশন */}
             {toastMsg && (
-                <div className="fixed bottom-10 right-10 z-[100] bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 animate-[slideInRight_0.4s_ease-out]">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <p className="font-bold text-sm tracking-wide">{toastMsg}</p>
+                <div className="fixed top-6 right-6 z-[100] bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-[slideInRight_0.4s_ease-out] border border-white/10 backdrop-blur-md">
+                    <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+                    <p className="font-bold text-xs tracking-widest uppercase">{toastMsg}</p>
                 </div>
             )}
 
-            {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm lg:hidden"></div>}
+            {/* মোবাইল সাইডবার ওভারলে */}
+            {isSidebarOpen && (
+                <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm lg:hidden transition-opacity"></div>
+            )}
 
-            {/* Sidebar */}
-            <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 text-white flex flex-col shadow-2xl transition-transform duration-300 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:static`}>
-                <div className="h-24 flex items-center px-8 border-b border-slate-800">
-                    <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center mr-3"><i className="fa-solid fa-bolt text-white text-sm"></i></div>
-                    <span className="text-lg font-bold tracking-tight">LAMS HR</span>
+            {/* 📱 প্রিমিয়াম সাইডবার */}
+            <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white flex flex-col border-r border-slate-100 shadow-2xl transition-transform duration-300 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:static`}>
+                <div className="h-24 flex items-center px-8">
+                    <div className="w-10 h-10 bg-slate-900 rounded-2xl flex items-center justify-center mr-3 shadow-lg shadow-slate-200">
+                        <i className="fa-solid fa-bolt text-white text-sm"></i>
+                    </div>
+                    <span className="text-xl font-black text-slate-900 tracking-tighter uppercase">Lams Power</span>
                 </div>
-                <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
+                
+                <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto scrollbar-hide">
                     {navItems.map((item) => (
                         <button 
                             key={item.path}
-                            onClick={() => { navigate(item.path); setIsSidebarOpen(false); if(item.path === '/leaves') fetchPendingCount(); }} 
-                            className={`group flex items-center justify-between w-full p-4 rounded-xl transition-all duration-200 ${location.pathname === item.path ? 'bg-orange-500 text-white' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+                            onClick={() => { navigate(item.path); setIsSidebarOpen(false); }} 
+                            className={`group flex items-center justify-between w-full p-4 rounded-2xl transition-all duration-300 ${location.pathname === item.path ? 'bg-slate-900 text-white shadow-xl translate-x-1' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-900'}`}
                         >
                             <div className="flex items-center gap-4">
-                                <i className={`fa-solid ${item.icon} w-5 text-center ${location.pathname === item.path ? 'text-white' : 'group-hover:text-orange-500'} transition-colors`}></i>
-                                <span className="text-xs font-bold uppercase tracking-wide">{item.label}</span>
+                                <i className={`fa-solid ${item.icon} w-5 text-center text-sm ${location.pathname === item.path ? 'text-white' : 'group-hover:text-slate-900'}`}></i>
+                                <span className="text-[10px] font-black uppercase tracking-[0.2em]">{item.label}</span>
                             </div>
-                            
-                            {/* ব্যাজ দেখানোর লজিক */}
                             {item.badge > 0 && (
-                                <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-md animate-bounce">
+                                <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-lg shadow-md animate-bounce">
                                     {item.badge}
                                 </span>
                             )}
                         </button>
                     ))}
                 </nav>
-                <div className="p-4 border-t border-slate-800">
-                    <button onClick={onLogout} className="flex items-center gap-3 w-full p-4 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition-all text-xs font-bold uppercase tracking-wider">
-                        <i className="fa-solid fa-arrow-right-from-bracket"></i> Logout
+
+                <div className="p-6 border-t border-slate-50">
+                    <button onClick={onLogout} className="flex items-center gap-4 w-full p-4 rounded-2xl text-slate-400 hover:bg-red-50 hover:text-red-600 transition-all text-[10px] font-black uppercase tracking-[0.2em]">
+                        <i className="fa-solid fa-power-off"></i> Logout
                     </button>
                 </div>
             </aside>
 
-            {/* Main Content Area */}
-            <main className="flex-1 flex flex-col overflow-hidden relative w-full">
-                <header className="h-24 bg-white/80 backdrop-blur-md border-b border-slate-200 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-30">
-                    <div className="flex items-center gap-4">
-                        <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden w-10 h-10 bg-white border border-slate-200 rounded-xl flex items-center justify-center text-slate-600 shadow-sm active:scale-95">
-                            <i className="fa-solid fa-bars text-lg"></i>
-                        </button>
-                        <div>
-                            <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{getPageTitle()}</h2>
-                            <p className="text-xs font-medium text-slate-400 mt-0.5 hidden sm:block">Pro Workspace</p>
-                        </div>
+            {/* 🚀 মেইন কন্টেন্ট এরিয়া */}
+            <main className="flex-1 flex flex-col overflow-hidden relative w-full bg-slate-50/30">
+                <header className="h-20 md:h-24 flex items-center justify-between px-6 lg:px-12 sticky top-0 z-30">
+                    <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden w-12 h-12 bg-white border border-slate-100 rounded-2xl flex items-center justify-center text-slate-900 shadow-sm active:scale-90 transition-all">
+                        <i className="fa-solid fa-bars-staggered"></i>
+                    </button>
+                    
+                    <div className="hidden lg:block">
+                        <h2 className="text-sm font-black text-slate-300 uppercase tracking-[0.4em]">Corporate Management System</h2>
                     </div>
-                    <div onClick={() => navigate('/profile')} className="flex items-center gap-4 pl-6 pr-2 py-2 bg-white border border-slate-100 rounded-full shadow-sm cursor-pointer hover:shadow-md transition-all">
-                        <div className="text-right hidden sm:block">
-                            <h2 className="font-bold text-slate-800 text-sm leading-tight">{user?.name}</h2>
-                            <p className="text-[10px] text-orange-500 font-bold uppercase tracking-wider">{user?.role}</p>
+
+                    <div onClick={() => navigate('/profile')} className="flex items-center gap-4 p-1.5 pr-4 bg-white border border-slate-100 rounded-2xl shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95">
+                        <img 
+                            src={user?.photo || `https://ui-avatars.com/api/?name=${user?.name}&background=0f172a&color=fff`} 
+                            className="w-10 h-10 md:w-12 md:h-12 rounded-xl object-cover border-2 border-slate-50 shadow-inner" 
+                        />
+                        <div className="hidden md:block">
+                            <h2 className="font-black text-slate-900 text-xs tracking-tight">{user?.name?.split(' ')[0]}</h2>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{user?.role}</p>
                         </div>
-                        <img src={user?.photo || `https://ui-avatars.com/api/?name=${user?.name}&background=ea580c&color=fff`} className="w-10 h-10 rounded-full border-2 border-white shadow-sm object-cover bg-slate-100" />
                     </div>
                 </header>
 
-                <div className="flex-1 overflow-y-auto p-4 lg:p-10 scroll-smooth pb-20">
+                <div className="flex-1 overflow-y-auto px-6 lg:px-12 pb-20 pt-4">
                     <Outlet /> 
                 </div>
             </main>
-            <style>{`@keyframes slideInRight { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }`}</style>
+
+            <style>{`
+                @keyframes slideInRight { 
+                    from { transform: translateX(100%); opacity: 0; } 
+                    to { transform: translateX(0); opacity: 1; } 
+                }
+                .scrollbar-hide::-webkit-scrollbar { display: none; }
+                .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+            `}</style>
         </div>
     );
 }
