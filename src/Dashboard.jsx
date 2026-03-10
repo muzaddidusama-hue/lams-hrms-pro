@@ -3,100 +3,152 @@ import { supabase } from './supabase';
 
 export default function Dashboard({ user }) {
     const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }));
-    const [stats, setStats] = useState({ total: 0, activeNow: 0, absent: 0 });
+    const [stats, setStats] = useState({ total: 0, activeNow: 0, absent: 0, leaves: 0 });
     const [notices, setNotices] = useState([]);
     const [holidays, setHolidays] = useState([]);
+    const [todaysLog, setTodaysLog] = useState(null);
     const [loading, setLoading] = useState(true);
+
+    const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false })), 1000);
-        fetchData();
+        fetchDashboardData();
         return () => clearInterval(timer);
     }, []);
 
-    const fetchData = async () => {
-        const today = new Date().toLocaleDateString('en-CA');
-        const [emp, act, tot, ntc, hol] = await Promise.all([
-            supabase.from('employees').select('*', { count: 'exact', head: true }),
-            supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', today).is('time_out', null),
-            supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', today),
-            supabase.from('notices').select('*').order('date', { ascending: false }).limit(2),
-            supabase.from('holidays').select('*').gte('date', today).limit(3)
-        ]);
-        setStats({ total: emp.count || 0, activeNow: act.count || 0, absent: (emp.count || 0) - (tot.count || 0) });
-        setNotices(ntc.data || []);
-        setHolidays(hol.data || []);
-        setLoading(false);
+    const fetchDashboardData = async () => {
+        try {
+            const todayStr = new Date().toLocaleDateString('en-CA');
+            const [empRes, activeRes, totalPresentRes, noticeRes, holidayRes] = await Promise.all([
+                supabase.from('employees').select('*', { count: 'exact', head: true }),
+                supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', todayStr).is('time_out', null),
+                supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', todayStr),
+                supabase.from('notices').select('*').order('date', { ascending: false }).limit(2),
+                supabase.from('holidays').select('*').gte('date', todayStr).limit(3)
+            ]);
+
+            setStats({
+                total: empRes.count || 0,
+                activeNow: activeRes.count || 0,
+                absent: Math.max(0, (empRes.count || 0) - (totalPresentRes.count || 0)),
+                leaves: 0 
+            });
+
+            setNotices(noticeRes.data || []);
+            setHolidays(holidayRes.data || []);
+
+            const { data: myAtt } = await supabase.from('attendance').select('*').eq('emp_id', user.emp_id).eq('date', todayStr).maybeSingle();
+            setTodaysLog(myAtt || null);
+        } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
-    if (loading) return <div className="h-screen flex items-center justify-center font-light text-slate-400 tracking-widest text-xs uppercase">Loading Dashboard</div>;
+    const handleAttendance = async (action) => {
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-CA');
+        const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+        if (action === 'clock_in') await supabase.from('attendance').insert([{ emp_id: user.emp_id, name: user.name, date: dateStr, time_in: timeStr }]);
+        else await supabase.from('attendance').update({ time_out: timeStr }).eq('emp_id', user.emp_id).eq('date', dateStr);
+        fetchDashboardData();
+    };
+
+    if (loading) return <div className="h-screen flex items-center justify-center font-sans font-black text-slate-200 text-2xl animate-pulse tracking-widest uppercase">Syncing Workspace</div>;
 
     return (
-        <div className="max-w-5xl mx-auto px-6 py-12 space-y-16 animate-[fadeIn_0.5s_ease-in-out]">
+        <div className="max-w-[1300px] mx-auto space-y-12 pb-24 px-4 animate-[fadeIn_0.5s_ease-out]">
             
-            {/* --- MINIMAL HEADER --- */}
-            <div className="flex justify-between items-end border-b border-slate-100 pb-10">
-                <div>
-                    <p className="text-[10px] font-medium text-slate-400 uppercase tracking-widest mb-2">Workspace</p>
-                    <h1 className="text-3xl font-light text-slate-900 tracking-tight">
-                        Welcome back, <span className="font-semibold text-slate-950">{user?.name}</span>
+            {/* --- PREMIUM COMPACT HEADER --- */}
+            <div className="bg-white rounded-[3rem] p-10 md:p-14 shadow-[0_20px_50px_rgba(0,0,0,0.03)] border border-slate-50 flex flex-col lg:flex-row justify-between items-center gap-8 relative overflow-hidden">
+                <div className="relative z-10 text-center lg:text-left">
+                    <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-300 mb-3">Lams Power Workspace</p>
+                    <h1 className="text-3xl lg:text-5xl font-black text-slate-900 leading-tight tracking-tight">
+                        Assalamu Alaikum,<br/>
+                        <span className="text-slate-400 font-normal italic">{user?.name}</span>
                     </h1>
                 </div>
-                <div className="text-right">
-                    <p className="text-2xl font-light text-slate-900 tracking-tighter">{currentTime}</p>
-                    <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest">March 2026</p>
+
+                <div className="relative z-10 p-1 bg-slate-900 rounded-[2.5rem] shadow-xl">
+                    <div className="bg-slate-950 px-10 py-10 rounded-[2.3rem] text-center">
+                        <h2 className="text-4xl font-black text-white tracking-tighter">{currentTime}</h2>
+                        <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.5em] mt-3">Standard Time</p>
+                    </div>
                 </div>
             </div>
 
-            {/* --- QUIET STATS --- */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
-                <StatBox label="Total Staff" value={stats.total} />
-                <StatBox label="Active Personnel" value={stats.activeNow} />
-                <StatBox label="Off Duty" value={stats.absent} />
+            {/* --- STATS SECTION --- */}
+            {isAdmin && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                    <StatCard label="Staff Force" value={stats.total} />
+                    <StatCard label="Active Now" value={stats.activeNow} isPositive />
+                    <StatCard label="Absent Today" value={stats.absent} isNegative />
+                    <StatCard label="Leaves" value={stats.leaves} isWarning />
+                </div>
+            )}
+
+            {/* --- DUTY HUB (Premium Dark) --- */}
+            <div className="bg-slate-950 rounded-[2.5rem] p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-8 shadow-2xl relative overflow-hidden">
+                <div className="flex items-center gap-6 relative z-10">
+                    <div className="w-16 h-16 bg-white/10 backdrop-blur-xl rounded-2xl flex items-center justify-center border border-white/10 text-white text-xl">
+                        <i className="fa-solid fa-fingerprint"></i>
+                    </div>
+                    <div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] mb-1">Attendance</p>
+                        <h2 className="text-xl font-bold text-white uppercase tracking-tight">Shift Control</h2>
+                    </div>
+                </div>
+                <div className="w-full md:w-auto relative z-10">
+                    {!todaysLog ? (
+                        <button onClick={() => handleAttendance('clock_in')} className="w-full md:w-64 py-5 bg-white text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all shadow-lg">Start Session</button>
+                    ) : !todaysLog.time_out ? (
+                        <button onClick={() => handleAttendance('clock_out')} className="w-full md:w-64 py-5 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg">End Session</button>
+                    ) : (
+                        <div className="w-full md:w-64 py-5 bg-white/5 border border-white/10 text-white/30 rounded-2xl font-black text-[10px] uppercase text-center">Duty Completed</div>
+                    )}
+                </div>
             </div>
 
-            {/* --- CONTENT GRID --- */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-20 pt-10">
-                {/* Notices */}
-                <section>
-                    <h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-[0.3em] mb-8 border-l-2 border-slate-900 pl-4">Noticeboard</h3>
-                    <div className="space-y-10">
-                        {notices.map(n => (
-                            <div key={n.id} className="group">
-                                <p className="text-[10px] text-slate-400 mb-2">{n.date}</p>
-                                <h4 className="text-sm font-semibold text-slate-800 mb-2 group-hover:text-slate-950 transition-colors">{n.title}</h4>
-                                <p className="text-xs text-slate-500 leading-relaxed font-light">{n.message}</p>
-                            </div>
-                        ))}
-                    </div>
-                </section>
-
-                {/* Holidays */}
-                <section>
-                    <h3 className="text-[10px] font-bold text-slate-900 uppercase tracking-[0.3em] mb-8 border-l-2 border-slate-900 pl-4">Upcoming Holidays</h3>
-                    <div className="divide-y divide-slate-50">
-                        {holidays.map(h => (
-                            <div key={h.id} className="py-4 flex justify-between items-center group">
-                                <span className="text-xs font-medium text-slate-700">{h.occasion}</span>
-                                <span className="text-[10px] text-slate-300 group-hover:text-slate-500 transition-colors font-mono">{h.date}</span>
-                            </div>
-                        ))}
-                        <div className="py-4 flex justify-between items-center opacity-50">
-                            <span className="text-xs font-medium text-slate-400">Weekly Off</span>
-                            <span className="text-[10px] text-slate-300 font-mono">FRIDAYS</span>
-                        </div>
-                    </div>
-                </section>
+            {/* --- BOARDS --- */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                <BoardCard title="Notice Board" icon="fa-bullhorn" color="text-orange-500" items={notices} type="notice" />
+                <BoardCard title="Upcoming Holidays" icon="fa-calendar-star" color="text-blue-500" items={holidays} type="holiday" />
             </div>
         </div>
     );
 }
 
-function StatBox({ label, value }) {
+function StatCard({ label, value, isPositive, isNegative, isWarning }) {
     return (
-        <div className="bg-white p-8 border border-slate-100 rounded-lg hover:border-slate-300 transition-colors">
-            <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest mb-4">{label}</p>
-            <p className="text-3xl font-light text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
+        <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-lg transition-all">
+            <div className={`w-1 h-5 rounded-full mb-5 ${isPositive ? 'bg-green-500' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-200'}`}></div>
+            <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-2">{label}</p>
+            <p className="text-4xl font-black text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
+        </div>
+    );
+}
+
+function BoardCard({ title, icon, color, items, type }) {
+    return (
+        <div className="bg-white rounded-[2.5rem] p-10 border border-slate-50 shadow-sm min-h-[350px]">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-8 flex items-center gap-3">
+                <i className={`fa-solid ${icon} ${color}`}></i> {title}
+            </h3>
+            <div className="space-y-6">
+                {items.length > 0 ? items.map((item, idx) => (
+                    <div key={idx} className={`${type === 'notice' ? 'p-6 bg-slate-50 border-l-4 border-slate-950' : 'flex justify-between p-4 border-b border-slate-50'} rounded-2xl`}>
+                        {type === 'notice' ? (
+                            <>
+                                <p className="font-black text-slate-900 text-xs mb-1 uppercase tracking-tight">{item.title}</p>
+                                <p className="text-[10px] text-slate-500 font-medium">{item.message}</p>
+                            </>
+                        ) : (
+                            <>
+                                <span className="font-bold text-slate-800 text-xs">{item.occasion}</span>
+                                <span className="text-[9px] font-black uppercase text-slate-400">{item.date}</span>
+                            </>
+                        )}
+                    </div>
+                )) : <p className="text-[10px] font-bold text-slate-200 uppercase italic">No records found</p>}
+            </div>
         </div>
     );
 }
