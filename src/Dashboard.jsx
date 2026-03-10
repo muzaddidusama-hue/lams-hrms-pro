@@ -1,128 +1,58 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { Link } from 'react-router-dom';
 
 export default function Dashboard({ user }) {
-    const [currentTime, setCurrentTime] = useState('00:00:00');
-    const [stats, setStats] = useState({ total: 0, activeNow: 0, absent: 0, leaves: 0 });
-    const [todaysLog, setTodaysLog] = useState(null);
-    const [workDuration, setWorkDuration] = useState('00h 00m 00s');
-    const [loading, setLoading] = useState(true);
-    const [loadingAction, setLoadingAction] = useState(false);
-
-    const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
+    const [notices, setNotices] = useState([]);
+    const [holidays, setHolidays] = useState([]);
 
     useEffect(() => {
-        const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false })), 1000);
-        return () => clearInterval(timer); 
+        const fetchDashboardInfo = async () => {
+            const today = new Date().toISOString().split('T')[0];
+            const nextWeek = new Date();
+            nextWeek.setDate(nextWeek.getDate() + 7);
+            
+            const [nRes, hRes] = await Promise.all([
+                supabase.from('notices').select('*').order('created_at', { ascending: false }).limit(2),
+                supabase.from('holidays').select('*').gte('date', today).lte('date', nextWeek.toISOString().split('T')[0])
+            ]);
+            setNotices(nRes.data || []);
+            setHolidays(hRes.data || []);
+        };
+        fetchDashboardInfo();
     }, []);
 
-    useEffect(() => {
-        fetchDashboardData();
-        const channel = supabase.channel('dashboard-realtime')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => fetchDashboardData())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchDashboardData())
-            .subscribe();
-        return () => supabase.removeChannel(channel);
-    }, [isAdmin]);
-
-    const fetchDashboardData = async () => {
-        const todayStr = new Date().toLocaleDateString('en-CA');
-        try {
-            if (isAdmin) {
-                const [empRes, activeRes, totalPresentRes, leaveRes] = await Promise.all([
-                    supabase.from('employees').select('*', { count: 'exact', head: true }),
-                    supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', todayStr).is('time_out', null),
-                    supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', todayStr),
-                    supabase.from('leaves').select('*', { count: 'exact', head: true }).eq('status', 'Pending')
-                ]);
-                setStats({ 
-                    total: empRes.count || 0, activeNow: activeRes.count || 0, 
-                    absent: Math.max(0, (empRes.count || 0) - (totalPresentRes.count || 0)), 
-                    leaves: leaveRes.count || 0 
-                });
-            }
-            const { data: myAtt } = await supabase.from('attendance').select('*').eq('emp_id', user.emp_id).eq('date', todayStr).maybeSingle();
-            setTodaysLog(myAtt || null);
-        } catch (error) { console.error(error); } finally { setLoading(false); }
-    };
-
-    useEffect(() => {
-        let interval;
-        if (todaysLog?.time_in && !todaysLog?.time_out) {
-            const start = new Date(`${todaysLog.date}T${todaysLog.time_in}`);
-            interval = setInterval(() => {
-                const diff = new Date() - start;
-                const h = Math.floor(diff / 3600000);
-                const m = Math.floor((diff % 3600000) / 60000);
-                const s = Math.floor((diff % 60000) / 1000);
-                setWorkDuration(`${h.toString().padStart(2,'0')}h ${m.toString().padStart(2,'0')}m ${s.toString().padStart(2,'0')}s`);
-            }, 1000);
-        } else { setWorkDuration("00h 00m 00s"); }
-        return () => clearInterval(interval);
-    }, [todaysLog]);
-
-    const handleAttendance = async (action) => {
-        setLoadingAction(true);
-        const now = new Date();
-        const dateStr = now.toLocaleDateString('en-CA');
-        const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
-        try {
-            if (action === 'clock_in') {
-                await supabase.from('attendance').insert([{ emp_id: user.emp_id, name: user.name, date: dateStr, time_in: timeStr }]);
-            } else {
-                await supabase.from('attendance').update({ time_out: timeStr }).eq('emp_id', user.emp_id).eq('date', dateStr);
-            }
-            fetchDashboardData(); 
-        } catch (err) { alert("Error!"); } finally { setLoadingAction(false); }
-    };
-
-    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase">Syncing...</div>;
-
     return (
-        <div className="max-w-7xl mx-auto space-y-10 animate-[fadeIn_0.6s_ease-out] pb-24 px-4">
-            <style>{`@import url('https://fonts.googleapis.com/css2?family=Imperial+Script&display=swap');`}</style>
-            
-            <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.04)] border border-slate-50 relative overflow-hidden text-center lg:text-left">
-                <div className="relative z-10 flex flex-col lg:flex-row justify-between items-center gap-12">
-                    <div>
-                        <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 leading-[1.2] tracking-tight">Assalamu Alaikum,<br/><span style={{ fontFamily: "'Imperial Script', cursive", fontWeight: 'normal' }} className="text-slate-600 block mt-2 text-5xl md:text-6xl lg:text-7xl">{user?.name}</span></h1>
+        <div className="max-w-7xl mx-auto space-y-10">
+            {/* ... আগের ক্লক-ইন এবং স্ট্যাটাস কার্ডগুলো এখানে থাকবে ... */}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                {/* Notice Board */}
+                <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-sm">
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-8 flex items-center gap-3"><i className="fa-solid fa-bullhorn text-orange-500"></i> Notice Board</h3>
+                    <div className="space-y-6">
+                        {notices.map(n => (
+                            <div key={n.id} className="p-6 bg-slate-50 rounded-2xl border-l-4 border-slate-950 shadow-sm">
+                                <p className="font-black text-slate-900 text-xs mb-1 uppercase tracking-tight">{n.title}</p>
+                                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">{n.content}</p>
+                            </div>
+                        ))}
                     </div>
-                    <div className="p-12 bg-slate-950 rounded-[3rem] shadow-2xl min-w-[300px]"><h2 className="text-5xl font-black tracking-tighter text-white">{currentTime}</h2></div>
+                </div>
+
+                {/* Holiday List */}
+                <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-sm">
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-8 flex items-center gap-3"><i className="fa-solid fa-calendar-star text-blue-500"></i> Upcoming Holidays</h3>
+                    <div className="space-y-4">
+                        {holidays.map(h => (
+                            <div key={h.id} className="flex items-center justify-between p-4 border-b border-slate-50">
+                                <span className="font-bold text-slate-800 text-xs">{h.title}</span>
+                                <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{h.date}</span>
+                            </div>
+                        ))}
+                        <div className="flex justify-between p-4 text-slate-400"><span className="text-xs font-bold italic">Every Friday</span><span className="text-[9px] font-black uppercase">Weekly Off</span></div>
+                    </div>
                 </div>
             </div>
-
-            {isAdmin && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                    <Link to="/team" className="block"><ExecutiveStat label="Staff Force" value={stats.total} /></Link>
-                    <Link to="/attendance" className="block"><ExecutiveStat label="Active Now" value={stats.activeNow} isPositive /></Link>
-                    <Link to="/attendance" className="block"><ExecutiveStat label="Absent Today" value={stats.absent} isNegative /></Link>
-                    <Link to="/leaves" className="block"><ExecutiveStat label="Pending" value={stats.leaves} isWarning /></Link>
-                </div>
-            )}
-
-            <div className="bg-white rounded-[3rem] p-10 md:p-14 border border-slate-100 shadow-sm flex flex-col md:flex-row items-center justify-between gap-12">
-                <div className="flex items-center gap-8"><div className="w-20 h-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center text-white"><i className="fa-solid fa-hourglass-start text-2xl"></i></div><div><p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Duty Session</p><h2 className="text-4xl font-black text-slate-900 tracking-tighter">{workDuration}</h2></div></div>
-                <div className="w-full md:w-auto">
-                    {!todaysLog ? (
-                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-slate-950 text-white rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl">Start Duty</button>
-                    ) : !todaysLog.time_out ? (
-                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-white text-red-600 border-2 border-red-50 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-lg">End Duty</button>
-                    ) : (
-                        <div className="w-full md:w-80 h-16 bg-green-50 text-green-700 rounded-[1.8rem] font-black text-xs uppercase border border-green-100 flex items-center justify-center gap-3">Day Completed</div>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function ExecutiveStat({ label, value, isPositive, isNegative, isWarning }) {
-    return (
-        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center transition-all h-full">
-            <div className={`w-1.5 h-6 rounded-full mb-6 ${isPositive ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.4)]' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-200'}`}></div>
-            <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mb-2">{label}</p>
-            <p className="text-4xl font-black text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
         </div>
     );
 }
