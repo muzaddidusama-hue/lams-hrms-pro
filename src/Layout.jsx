@@ -5,6 +5,7 @@ import { supabase } from './supabase';
 export default function Layout({ user, onLogout }) {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [pendingLeaves, setPendingLeaves] = useState(0);
+    const [toast, setToast] = useState(null);
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -13,11 +14,16 @@ export default function Layout({ user, onLogout }) {
     useEffect(() => {
         fetchPendingCount();
         if (isAdmin) {
-            const leafChannel = supabase
-                .channel('global-nav-sync')
+            const channel = supabase.channel('layout-realtime')
+                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leaves' }, (payload) => {
+                    fetchPendingCount();
+                    setToast(`New Leave Request: ${payload.new.name}`);
+                    setTimeout(() => setToast(null), 5000);
+                    new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3').play().catch(() => {});
+                })
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchPendingCount())
                 .subscribe();
-            return () => supabase.removeChannel(leafChannel);
+            return () => supabase.removeChannel(channel);
         }
     }, [isAdmin]);
 
@@ -32,67 +38,44 @@ export default function Layout({ user, onLogout }) {
         { path: '/attendance', icon: 'fa-calendar-check', label: 'Attendance' }, 
         { path: '/leaves', icon: 'fa-paper-plane', label: 'Leaves', badge: pendingLeaves }, 
         { path: '/payroll', icon: 'fa-sack-dollar', label: 'Payroll' },
-        { path: '/profile', icon: 'fa-user-gear', label: 'Profile Settings' }
+        { path: '/profile', icon: 'fa-user-gear', label: 'Profile' }
     ] : [
         { path: '/', icon: 'fa-house', label: 'Home' }, 
         { path: '/leaves', icon: 'fa-paper-plane', label: 'Leaves' }, 
         { path: '/payroll', icon: 'fa-sack-dollar', label: 'Payslip' },
-        { path: '/profile', icon: 'fa-user', label: 'My Profile' }
+        { path: '/profile', icon: 'fa-user', label: 'Profile' }
     ];
 
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden font-sans relative">
-            
-            {/* 📱 Mobile Toggle */}
-            <button 
-                onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
-                className="lg:hidden fixed bottom-8 right-8 z-[100] w-14 h-14 bg-slate-950 text-white rounded-2xl shadow-2xl flex items-center justify-center active:scale-90 transition-all"
-            >
-                <i className={`fa-solid ${isSidebarOpen ? 'fa-xmark' : 'fa-bars-staggered'} text-xl`}></i>
-            </button>
-
-            {isSidebarOpen && (
-                <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 z-[80] bg-slate-900/40 backdrop-blur-sm lg:hidden"></div>
+            {/* 🔔 Toast Notification */}
+            {toast && (
+                <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[1000] bg-slate-950 text-white px-8 py-4 rounded-3xl shadow-2xl flex items-center gap-4 animate-bounce border border-white/10">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-ping"></div>
+                    <p className="font-black text-[10px] uppercase tracking-widest">{toast}</p>
+                </div>
             )}
 
-            {/* Sidebar */}
-            <aside className={`fixed lg:static inset-y-0 left-0 z-[90] w-72 bg-white border-r border-slate-100 flex flex-col shadow-2xl lg:shadow-none transition-transform duration-300 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-                <div className="h-28 flex items-center px-10">
-                    <span className="text-xl font-black text-slate-950 tracking-tighter uppercase">Lams Power</span>
-                </div>
-                
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="lg:hidden fixed bottom-8 right-8 z-[100] w-14 h-14 bg-slate-950 text-white rounded-2xl shadow-2xl flex items-center justify-center"><i className={`fa-solid ${isSidebarOpen ? 'fa-xmark' : 'fa-bars-staggered'}`}></i></button>
+
+            <aside className={`fixed lg:static inset-y-0 left-0 z-[90] w-72 bg-white border-r border-slate-100 flex flex-col transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+                <div className="h-28 flex items-center px-10"><span className="text-xl font-black text-slate-950 tracking-tighter uppercase">Lams Power</span></div>
                 <nav className="flex-1 px-6 space-y-2 mt-4 overflow-y-auto">
                     {navItems.map((item) => (
-                        <button 
-                            key={item.path}
-                            onClick={() => { navigate(item.path); setIsSidebarOpen(false); }} 
-                            className={`flex items-center justify-between w-full p-4 rounded-2xl transition-all ${location.pathname === item.path ? 'bg-slate-950 text-white shadow-xl' : 'text-slate-400 hover:bg-slate-50'}`}
-                        >
-                            <div className="flex items-center gap-4">
-                                <i className={`fa-solid ${item.icon} w-5 text-sm`}></i>
-                                <span className="text-[10px] font-black uppercase tracking-[0.3em]">{item.label}</span>
-                            </div>
+                        <button key={item.path} onClick={() => { navigate(item.path); setIsSidebarOpen(false); }} className={`flex items-center justify-between w-full p-4 rounded-2xl transition-all ${location.pathname === item.path ? 'bg-slate-950 text-white shadow-xl' : 'text-slate-400 hover:bg-slate-50'}`}>
+                            <div className="flex items-center gap-4"><i className={`fa-solid ${item.icon} w-5 text-sm`}></i><span className="text-[10px] font-black uppercase tracking-[0.3em]">{item.label}</span></div>
                             {item.badge > 0 && <span className="bg-red-500 text-white text-[9px] font-black px-2 py-0.5 rounded-lg">{item.badge}</span>}
                         </button>
                     ))}
                 </nav>
-
-                <div className="p-8 border-t border-slate-50">
-                    <button onClick={onLogout} className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-widest hover:text-red-500 transition-all">
-                        <i className="fa-solid fa-power-off"></i> Logout
-                    </button>
-                </div>
+                <div className="p-8 border-t border-slate-50"><button onClick={onLogout} className="flex items-center gap-4 text-slate-400 text-[10px] font-black uppercase tracking-widest hover:text-red-500 transition-all"><i className="fa-solid fa-power-off"></i> Logout</button></div>
             </aside>
 
-            {/* Main Content */}
             <main className="flex-1 overflow-y-auto relative w-full px-6 lg:px-16 pb-20 pt-8">
-                <header className="flex justify-end mb-8 lg:mb-12">
+                <header className="flex justify-end mb-12">
                     <div onClick={() => navigate('/profile')} className="flex items-center gap-4 p-2 pr-5 bg-white rounded-2xl border border-slate-100 shadow-sm cursor-pointer hover:shadow-md transition-all">
                         <img src={user?.photo || `https://ui-avatars.com/api/?name=${user?.name}&background=0f172a&color=fff`} className="w-10 h-10 rounded-xl object-cover" />
-                        <div className="hidden sm:block">
-                            <p className="text-[10px] font-black text-slate-900 leading-none mb-1">{user?.name?.split(' ')[0]}</p>
-                            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{user?.role}</p>
-                        </div>
+                        <div className="hidden sm:block"><p className="text-[10px] font-black text-slate-900 leading-none mb-1">{user?.name}</p><p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{user?.role}</p></div>
                     </div>
                 </header>
                 <Outlet />
