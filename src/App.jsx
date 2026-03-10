@@ -9,6 +9,7 @@ import Payroll from './Payroll'
 import Leaves from './Leaves'
 import Holidays from './Holidays'
 import Attendance from './Attendance'
+import Notices from './Notices';
 
 export default function App() {
   // বুলেটপ্রুফ স্টেট: পেজ লোড হওয়ার আগেই চেক করবে ডাটা আসল নাকি নষ্ট
