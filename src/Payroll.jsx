@@ -6,11 +6,10 @@ import html2canvas from 'html2canvas';
 export default function Payroll({ user }) {
     const [payslips, setPayslips] = useState([]);
     const [selectedSlip, setSelectedSlip] = useState(null);
+    const [isDownloading, setIsDownloading] = useState(false);
     const slipRef = useRef();
 
-    useEffect(() => {
-        fetchPayslips();
-    }, []);
+    useEffect(() => { fetchPayslips(); }, []);
 
     const fetchPayslips = async () => {
         let query = supabase.from('payroll').select('*');
@@ -19,16 +18,20 @@ export default function Payroll({ user }) {
         setPayslips(data || []);
     };
 
-    const downloadPDF = async () => {
+    // 🚀 PDF Download Function (ব্রাউজার প্রিন্ট নয়, সরাসরি ডাউনলোড)
+    const handleDownload = async () => {
+        setIsDownloading(true);
         const element = slipRef.current;
-        const canvas = await html2canvas(element, { scale: 2 });
+        const canvas = await html2canvas(element, { scale: 3, useCORS: true });
         const imgData = canvas.toDataURL('image/png');
+        
         const pdf = new jsPDF('p', 'mm', 'a4');
-        const imgProps = pdf.getImageProperties(imgData);
         const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        
         pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-        pdf.save(`Payslip_${selectedSlip.month}_${selectedSlip.name}.pdf`);
+        pdf.save(`Payslip_${selectedSlip.name}_${selectedSlip.month}.pdf`);
+        setIsDownloading(false);
     };
 
     return (
@@ -46,7 +49,7 @@ export default function Payroll({ user }) {
                                 <td className="p-6 font-bold text-slate-700">{slip.name}</td>
                                 <td className="p-6 text-slate-500 font-medium">{slip.month}</td>
                                 <td className="p-6 font-black text-slate-900">৳{slip.net_salary}</td>
-                                <td className="p-6"><button onClick={() => setSelectedSlip(slip)} className="text-slate-900 font-black text-[10px] uppercase underline underline-offset-4 tracking-widest hover:text-blue-600 transition-all">View Payslip</button></td>
+                                <td className="p-6"><button onClick={() => setSelectedSlip(slip)} className="text-slate-900 font-black text-[10px] uppercase underline underline-offset-4 tracking-widest">View Payslip</button></td>
                             </tr>
                         ))}
                     </tbody>
@@ -55,32 +58,34 @@ export default function Payroll({ user }) {
 
             {selectedSlip && (
                 <div className="fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 relative shadow-2xl my-10">
+                    <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 relative shadow-2xl my-10 animate-[zoomIn_0.3s_ease-out]">
                         <button onClick={() => setSelectedSlip(null)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900"><i className="fa-solid fa-xmark text-xl"></i></button>
                         
-                        {/* PDF Content Start */}
-                        <div ref={slipRef} className="p-10 border border-slate-100 rounded-[2rem] bg-white">
-                            <div className="flex justify-between items-start mb-12">
-                                <div><h2 className="text-2xl font-black text-slate-900 uppercase">Lams Power</h2><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Official Pay Document</p></div>
-                                <div className="text-right"><p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Month</p><p className="text-xl font-black text-slate-900">{selectedSlip.month}</p></div>
+                        {/* এই অংশটি পিডিএফ হবে */}
+                        <div ref={slipRef} className="p-8 bg-white border border-slate-50 rounded-[2rem]">
+                            <div className="flex justify-between items-start mb-8">
+                                <div><h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Lams Power</h2><p className="text-[8px] text-slate-400 font-black uppercase tracking-widest">Digital Payslip</p></div>
+                                <div className="text-right"><p className="text-[8px] text-slate-400 font-black uppercase tracking-widest">Month</p><p className="font-black text-slate-900">{selectedSlip.month}</p></div>
                             </div>
-                            <div className="grid grid-cols-2 gap-10 mb-12">
-                                <div><p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Employee Name</p><p className="font-bold text-slate-900">{selectedSlip.name}</p></div>
-                                <div><p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">Employee ID</p><p className="font-bold text-slate-900">{selectedSlip.emp_id}</p></div>
-                            </div>
-                            <div className="space-y-4 border-t border-slate-100 pt-8">
-                                <div className="flex justify-between font-bold text-slate-600"><span>Basic Salary</span><span>৳{selectedSlip.basic_salary}</span></div>
-                                <div className="flex justify-between font-bold text-slate-600"><span>Allowances</span><span>৳{selectedSlip.allowances}</span></div>
-                                <div className="flex justify-between font-bold text-red-500"><span>Deductions</span><span>-৳{selectedSlip.deductions}</span></div>
-                                <div className="flex justify-between text-2xl font-black text-slate-900 pt-4 border-t border-slate-900"><span>Net Payable</span><span>৳{selectedSlip.net_salary}</span></div>
+                            <div className="space-y-6">
+                                <div className="flex justify-between border-b border-slate-50 pb-2"><span className="text-[10px] text-slate-400 uppercase font-black">Employee</span><span className="font-bold text-slate-900">{selectedSlip.name}</span></div>
+                                <div className="flex justify-between border-b border-slate-50 pb-2"><span className="text-[10px] text-slate-400 uppercase font-black">Basic</span><span className="font-bold text-slate-900">৳{selectedSlip.basic_salary}</span></div>
+                                <div className="flex justify-between border-b border-slate-50 pb-2"><span className="text-[10px] text-slate-400 uppercase font-black">Deductions</span><span className="font-bold text-red-500">-৳{selectedSlip.deductions}</span></div>
+                                <div className="flex justify-between pt-4"><span className="text-sm text-slate-900 font-black uppercase">Net Payable</span><span className="text-xl font-black text-slate-900">৳{selectedSlip.net_salary}</span></div>
                             </div>
                         </div>
-                        {/* PDF Content End */}
 
-                        <button onClick={downloadPDF} className="w-full mt-8 h-16 bg-slate-900 text-white rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.3em] shadow-xl hover:scale-[1.02] active:scale-95 transition-all">Download PDF Payslip</button>
+                        <button 
+                            onClick={handleDownload} 
+                            disabled={isDownloading}
+                            className={`w-full mt-8 h-16 rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.3em] shadow-xl transition-all ${isDownloading ? 'bg-slate-400' : 'bg-slate-900 text-white hover:scale-[1.02]'}`}
+                        >
+                            {isDownloading ? 'Downloading...' : 'Download PDF Payslip'}
+                        </button>
                     </div>
                 </div>
             )}
+            <style>{`@keyframes zoomIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
         </div>
     );
 }
