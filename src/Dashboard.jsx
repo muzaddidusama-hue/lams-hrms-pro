@@ -17,14 +17,15 @@ export default function Dashboard({ user }) {
         return () => clearInterval(timer); 
     }, []);
 
-    useEffect(() => {
-        fetchDashboardData();
-        const channel = supabase.channel('dashboard-live')
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => fetchDashboardData())
-            .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchDashboardData())
-            .subscribe();
-        return () => supabase.removeChannel(channel);
-    }, [isAdmin]);
+useEffect(() => {
+    fetchDashboardData();
+    // ইউনিক চ্যানেল নাম দিন 'db-unique-channel'
+    const channel = supabase.channel('db-unique-channel')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchDashboardData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => fetchDashboardData())
+        .subscribe();
+    return () => supabase.removeChannel(channel);
+}, [isAdmin]);
 
     const fetchDashboardData = async () => {
         const todayStr = new Date().toLocaleDateString('en-CA');
