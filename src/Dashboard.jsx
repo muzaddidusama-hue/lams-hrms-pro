@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
+import { Link } from 'react-router-dom'; // 🔗 লিঙ্ক করার জন্য
 
 export default function Dashboard({ user }) {
     const [currentTime, setCurrentTime] = useState('00:00:00');
@@ -16,25 +17,18 @@ export default function Dashboard({ user }) {
         return () => clearInterval(timer); 
     }, []);
 
-    // 🚀 লাইভ আপডেট লজিক: ডাটাবেজে কোনো চেঞ্জ হলেই এই ফাংশনটি রান করবে
     useEffect(() => {
         fetchDashboardData();
 
         if (isAdmin) {
-            // ১. এটেনডেন্স টেবিল মনিটর করা (প্রেজেন্ট/এবসেন্ট আপডেটের জন্য)
             const attendanceChannel = supabase
-                .channel('attendance-db-changes')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-                    fetchDashboardData();
-                })
+                .channel('admin-dashboard-att')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => fetchDashboardData())
                 .subscribe();
 
-            // ২. লিভ টেবিল মনিটর করা (পেন্ডিং রিকোয়েস্ট আপডেটের জন্য)
             const leaveChannel = supabase
-                .channel('leaves-db-changes')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => {
-                    fetchDashboardData();
-                })
+                .channel('admin-dashboard-leaves')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => fetchDashboardData())
                 .subscribe();
 
             return () => {
@@ -58,8 +52,7 @@ export default function Dashboard({ user }) {
                 setStats({ total, present, absent: Math.max(0, total - present), leaves: leaveCount.count || 0 });
             }
             const { data: myAtt } = await supabase.from('attendance').select('*').eq('emp_id', user.emp_id).eq('date', todayStr).maybeSingle();
-            if(myAtt) setTodaysLog(myAtt);
-            else setTodaysLog(null); // ক্লক আউটের পর রিসেট করার জন্য
+            setTodaysLog(myAtt || null);
         } catch (error) { console.error(error); } finally { setLoading(false); }
     };
 
@@ -93,7 +86,7 @@ export default function Dashboard({ user }) {
         } catch (err) { alert("Error!"); } finally { setLoadingAction(false); }
     };
 
-    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Initializing Core...</div>;
+    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Syncing Dashboard...</div>;
 
     return (
         <div className="max-w-7xl mx-auto space-y-10 animate-[fadeIn_0.6s_ease-out] pb-24 px-4">
@@ -108,7 +101,7 @@ export default function Dashboard({ user }) {
                     <div className="text-center lg:text-left">
                         <div className="flex items-center justify-center lg:justify-start gap-3 mb-6">
                             <div className="w-1.5 h-1.5 bg-slate-900 rounded-full animate-pulse"></div>
-                            <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.5em]">Live Monitoring On</span>
+                            <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.5em]">Lams Power Live Portal</span>
                         </div>
                         <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 leading-[1.2] tracking-tight">
                             Assalamu Alaikum,<br/>
@@ -116,43 +109,51 @@ export default function Dashboard({ user }) {
                                 {user?.name}
                             </span>
                         </h1>
-                        <p className="text-slate-400 text-xs mt-8 font-bold uppercase tracking-[0.2em] opacity-60">Lams Power Corporate Portal</p>
                     </div>
-                    <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] shadow-2xl min-w-[300px] border-t border-white/5">
+                    <div className="flex flex-col items-center justify-center p-12 bg-slate-950 rounded-[3rem] shadow-2xl min-w-[300px]">
                         <h2 className="text-5xl font-black tracking-tighter text-white">{currentTime}</h2>
                         <div className="w-8 h-1 bg-slate-700 my-4 rounded-full"></div>
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em]">Real-time Sync</p>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em]">Network Time</p>
                     </div>
                 </div>
             </div>
 
+            {/* 📊 Admin Cards with Dynamic Links */}
             {isAdmin && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                    <ExecutiveStat label="Total Staff" value={stats.total} />
-                    <ExecutiveStat label="Present" value={stats.present} isPositive />
-                    <ExecutiveStat label="Absent" value={stats.absent} isNegative />
-                    <ExecutiveStat label="Pending Leaves" value={stats.leaves} isWarning />
+                    <Link to="/team" className="block">
+                        <ExecutiveStat label="Total Staff" value={stats.total} />
+                    </Link>
+                    <Link to="/attendance" className="block">
+                        <ExecutiveStat label="Active Now" value={stats.present} isPositive />
+                    </Link>
+                    <Link to="/attendance" className="block">
+                        <ExecutiveStat label="Off Duty" value={stats.absent} isNegative />
+                    </Link>
+                    <Link to="/leaves" className="block">
+                        <ExecutiveStat label="Pending" value={stats.leaves} isWarning />
+                    </Link>
                 </div>
             )}
 
-            <div className="bg-white rounded-[3rem] p-10 md:p-14 border border-slate-100 shadow-[0_10px_40px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-center justify-between gap-12">
+            <div className="bg-white rounded-[3rem] p-10 md:p-14 border border-slate-100 shadow-sm flex flex-col md:flex-row items-center justify-between gap-12">
                 <div className="flex items-center gap-8">
                     <div className="w-20 h-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl">
                         <i className="fa-solid fa-hourglass-start text-2xl"></i>
                     </div>
                     <div>
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Session Duration</p>
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Shift Duration</p>
                         <h2 className="text-4xl font-black text-slate-900 tracking-tighter">{workDuration}</h2>
                     </div>
                 </div>
                 
                 <div className="w-full md:w-auto">
                     {!todaysLog ? (
-                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-slate-950 text-white rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl hover:bg-slate-800 transition-all active:scale-[0.97]">
+                        <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-slate-950 text-white rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl active:scale-[0.97]">
                             Initiate Duty
                         </button>
                     ) : !todaysLog.time_out ? (
-                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-white text-red-600 border-2 border-red-50 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-lg hover:bg-red-50 transition-all active:scale-[0.97]">
+                        <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="w-full md:w-80 h-16 bg-white text-red-600 border-2 border-red-50 rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-lg active:scale-[0.97]">
                             Conclude Duty
                         </button>
                     ) : (
@@ -169,7 +170,7 @@ export default function Dashboard({ user }) {
 
 function ExecutiveStat({ label, value, isPositive, isNegative, isWarning }) {
     return (
-        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-lg transition-all duration-500">
+        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-xl hover:border-slate-200 transition-all duration-500 cursor-pointer h-full">
             <div className={`w-1.5 h-6 rounded-full mb-6 ${isPositive ? 'bg-green-500' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-200'}`}></div>
             <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mb-2">{label}</p>
             <p className="text-4xl font-black text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
