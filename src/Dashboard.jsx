@@ -12,17 +12,16 @@ export default function Dashboard({ user }) {
     const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
 
     useEffect(() => {
-        const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false })), 1000);
+        const timer = setInterval(() => {
+            setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false }));
+        }, 1000);
         fetchDashboardData();
         return () => clearInterval(timer);
     }, []);
 
     const fetchDashboardData = async () => {
-        setLoading(true);
         try {
             const todayStr = new Date().toLocaleDateString('en-CA');
-            
-            // ১. স্ট্যাটাস কার্ডের ডাটা
             const [empRes, activeRes, totalPresentRes, noticeRes, holidayRes] = await Promise.all([
                 supabase.from('employees').select('*', { count: 'exact', head: true }),
                 supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', todayStr).is('time_out', null),
@@ -38,14 +37,12 @@ export default function Dashboard({ user }) {
                 total: totalEmp,
                 activeNow: activeRes.count || 0,
                 absent: Math.max(0, totalEmp - presentToday),
-                leaves: 0 // প্রয়োজন হলে লিভ টেবিল থেকে কাউন্ট আনতে পারেন
+                leaves: 0 
             });
 
-            // ২. নোটিশ এবং হলিডে (আপনার কলাম নেম অনুযায়ী)
             setNotices(noticeRes.data || []);
             setHolidays(holidayRes.data || []);
 
-            // ৩. নিজের আজকের এটেনডেন্স
             const { data: myAtt } = await supabase.from('attendance')
                 .select('*')
                 .eq('emp_id', user.emp_id)
@@ -53,9 +50,8 @@ export default function Dashboard({ user }) {
                 .maybeSingle();
             
             setTodaysLog(myAtt || null);
-
-        } catch (error) {
-            console.error("Dashboard Fetch Error:", error);
+        } catch (e) {
+            console.error(e);
         } finally {
             setLoading(false);
         }
@@ -67,101 +63,115 @@ export default function Dashboard({ user }) {
         const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
         
         if (action === 'clock_in') {
-            await supabase.from('attendance').insert([{ 
-                emp_id: user.emp_id, 
-                name: user.name, 
-                date: dateStr, 
-                time_in: timeStr 
-            }]);
+            await supabase.from('attendance').insert([{ emp_id: user.emp_id, name: user.name, date: dateStr, time_in: timeStr }]);
         } else {
-            await supabase.from('attendance').update({ time_out: timeStr })
-                .eq('emp_id', user.emp_id)
-                .eq('date', dateStr);
+            await supabase.from('attendance').update({ time_out: timeStr }).eq('emp_id', user.emp_id).eq('date', dateStr);
         }
         fetchDashboardData();
     };
 
-    if (loading) return <div className="p-20 text-center font-black text-slate-200 animate-pulse tracking-[0.4em]">SYNCING LAMS POWER...</div>;
+    if (loading) return <div className="h-screen flex items-center justify-center font-display font-black text-slate-200 text-4xl animate-pulse tracking-widest">LAMS POWER</div>;
 
     return (
-        <div className="max-w-7xl mx-auto space-y-10 pb-24 px-4 animate-[fadeIn_0.5s_ease-out]">
-            {/* 👑 Welcome Header */}
-            <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.03)] border border-slate-100 flex flex-col lg:flex-row justify-between items-center gap-12">
-                <div className="text-center lg:text-left">
-                    <h1 className="text-4xl lg:text-6xl font-black text-slate-900 leading-[1.2] tracking-tighter">
-                        Assalamu Alaikum,<br/><span className="text-slate-400 italic font-normal">{user?.name}</span>
+        <div className="max-w-[1400px] mx-auto space-y-16 pb-32 animate-[fadeIn_0.8s_ease-out]">
+            
+            {/* --- PREMIUM HEADER --- */}
+            <div className="bg-white rounded-[4rem] p-10 md:p-20 shadow-[0_50px_100px_rgba(0,0,0,0.04)] border border-slate-50 flex flex-col lg:flex-row justify-between items-center gap-12 relative overflow-hidden group">
+                <div className="absolute -top-24 -right-24 w-96 h-96 bg-slate-50 rounded-full blur-3xl opacity-50 group-hover:bg-blue-50 transition-all duration-700"></div>
+                
+                <div className="relative z-10 text-center lg:text-left">
+                    <p className="text-[10px] font-black uppercase tracking-[0.5em] text-slate-300 mb-6">Lams Power Workspace</p>
+                    <h1 className="text-5xl lg:text-8xl font-black text-slate-900 leading-[0.85] tracking-tighter">
+                        Assalamu<br/>
+                        <span className="font-display italic text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-slate-500 to-slate-900">
+                            {user?.name}
+                        </span>
                     </h1>
+                    <div className="mt-10 flex items-center gap-4 justify-center lg:justify-start">
+                        <span className="flex h-3 w-3 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
+                        </span>
+                        <span className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Systems Active</span>
+                    </div>
                 </div>
-                <div className="p-12 bg-slate-950 rounded-[3rem] shadow-2xl min-w-[300px] text-center">
-                    <h2 className="text-5xl font-black text-white tracking-tighter">{currentTime}</h2>
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.4em] mt-4">Standard Time</p>
+
+                <div className="relative z-10 p-1.5 bg-gradient-to-br from-slate-800 to-slate-950 rounded-[3.8rem] shadow-2xl transition-transform hover:scale-105 duration-700">
+                    <div className="bg-slate-950 px-14 py-16 rounded-[3.5rem] text-center border border-white/5">
+                        <h2 className="text-7xl font-black text-white tracking-tighter font-display leading-none">{currentTime}</h2>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.6em] mt-6">Dhaka, BD</p>
+                    </div>
                 </div>
             </div>
 
-            {/* 📊 Executive Stats */}
+            {/* --- STATS SECTION --- */}
             {isAdmin && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                    <ExecutiveStat label="Staff Force" value={stats.total} />
-                    <ExecutiveStat label="Active Now" value={stats.activeNow} isPositive />
-                    <ExecutiveStat label="Absent Today" value={stats.absent} isNegative />
-                    <ExecutiveStat label="Leaves" value={stats.leaves} isWarning />
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
+                    <StatCard label="Total Force" value={stats.total} />
+                    <StatCard label="Live Now" value={stats.activeNow} color="text-green-500" />
+                    <StatCard label="Away" value={stats.absent} color="text-red-400" />
+                    <StatCard label="In Review" value={stats.leaves} color="text-amber-500" />
                 </div>
             )}
 
-            {/* ⚡ Duty Hub */}
-            <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-sm flex flex-col md:flex-row items-center justify-between gap-12">
-                <div className="flex items-center gap-8 text-center md:text-left">
-                    <div className="w-20 h-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl">
-                        <i className="fa-solid fa-bolt text-2xl text-orange-400"></i>
+            {/* --- DUTY CONTROL --- */}
+            <div className="bg-slate-950 rounded-[3.5rem] p-12 md:p-16 flex flex-col md:flex-row items-center justify-between gap-10 shadow-2xl relative overflow-hidden">
+                <div className="absolute inset-0 opacity-10 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
+                <div className="flex items-center gap-10 relative z-10">
+                    <div className="w-24 h-24 bg-white/10 backdrop-blur-2xl rounded-[2.5rem] flex items-center justify-center border border-white/10">
+                        <i className="fa-solid fa-fingerprint text-3xl text-white"></i>
                     </div>
                     <div>
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Session</p>
-                        <h2 className="text-4xl font-black text-slate-900 tracking-tighter">Duty Status</h2>
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mb-2">Biometric Verification</p>
+                        <h2 className="text-3xl font-black text-white tracking-tight">Shift Control</h2>
                     </div>
                 </div>
-                <div className="w-full md:w-auto">
+                <div className="w-full md:w-auto relative z-10">
                     {!todaysLog ? (
-                        <button onClick={() => handleAttendance('clock_in')} className="w-full md:w-80 h-16 bg-slate-950 text-white rounded-[1.8rem] font-black text-xs uppercase tracking-[0.3em] shadow-2xl active:scale-95 transition-all">Start Duty</button>
+                        <button onClick={() => handleAttendance('clock_in')} className="w-full md:w-80 py-6 bg-white text-slate-950 rounded-[2rem] font-black text-xs uppercase tracking-[0.3em] hover:bg-slate-200 transition-all shadow-xl">Start Session</button>
                     ) : !todaysLog.time_out ? (
-                        <button onClick={() => handleAttendance('clock_out')} className="w-full md:w-80 h-16 bg-white text-red-600 border-2 border-red-50 rounded-[1.8rem] font-black text-xs uppercase shadow-lg active:scale-95 transition-all">End Duty</button>
+                        <button onClick={() => handleAttendance('clock_out')} className="w-full md:w-80 py-6 bg-red-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.3em] hover:bg-red-600 transition-all shadow-xl">End Session</button>
                     ) : (
-                        <div className="w-full md:w-80 h-16 bg-green-50 text-green-700 rounded-[1.8rem] font-black text-xs uppercase border border-green-100 flex items-center justify-center gap-3">
-                            <i className="fa-solid fa-check-circle"></i> Shift Finished
-                        </div>
+                        <div className="w-full md:w-80 py-6 bg-white/5 border border-white/10 text-white/40 rounded-[2rem] font-black text-xs uppercase tracking-[0.3em] text-center">Duty Completed</div>
                     )}
                 </div>
             </div>
 
-            {/* 📢 Boards */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-sm min-h-[300px]">
-                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-8 flex items-center gap-3">
-                        <i className="fa-solid fa-bullhorn text-orange-500"></i> Notice Board
-                    </h3>
-                    <div className="space-y-6">
+            {/* --- BOARDS --- */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div className="bg-white rounded-[3.5rem] p-12 border border-slate-50 shadow-sm">
+                    <div className="flex justify-between items-center mb-10">
+                        <h3 className="text-[11px] font-black uppercase tracking-[0.4em] text-slate-300 flex items-center gap-4">
+                            <span className="w-8 h-1 bg-slate-900 rounded-full"></span> Notice board
+                        </h3>
+                    </div>
+                    <div className="space-y-8">
                         {notices.map(n => (
-                            <div key={n.id} className="p-6 bg-slate-50 rounded-2xl border-l-4 border-slate-950">
-                                <p className="font-black text-slate-900 text-xs mb-1 uppercase tracking-tight">{n.title}</p>
-                                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">{n.message}</p>
+                            <div key={n.id} className="group cursor-default">
+                                <p className="text-[10px] font-black text-slate-300 uppercase mb-2">{n.date}</p>
+                                <h4 className="text-lg font-black text-slate-900 uppercase group-hover:text-blue-600 transition-colors">{n.title}</h4>
+                                <p className="text-sm text-slate-400 mt-2 leading-relaxed">{n.message}</p>
                             </div>
                         ))}
                     </div>
                 </div>
 
-                <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-sm min-h-[300px]">
-                    <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-8 flex items-center gap-3">
-                        <i className="fa-solid fa-calendar-star text-blue-500"></i> Upcoming Holidays
-                    </h3>
-                    <div className="space-y-4">
+                <div className="bg-white rounded-[3.5rem] p-12 border border-slate-50 shadow-sm">
+                    <div className="flex justify-between items-center mb-10">
+                        <h3 className="text-[11px] font-black uppercase tracking-[0.4em] text-slate-300 flex items-center gap-4">
+                            <span className="w-8 h-1 bg-slate-900 rounded-full"></span> Upcoming
+                        </h3>
+                    </div>
+                    <div className="space-y-6">
                         {holidays.map(h => (
-                            <div key={h.id} className="flex items-center justify-between p-4 border-b border-slate-50">
-                                <span className="font-bold text-slate-800 text-xs">{h.occasion}</span>
-                                <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{h.date}</span>
+                            <div key={h.id} className="flex justify-between items-center p-6 bg-slate-50 rounded-[2rem]">
+                                <span className="font-black text-slate-800 uppercase text-xs tracking-tight">{h.occasion}</span>
+                                <span className="text-[10px] font-black text-slate-400">{h.date}</span>
                             </div>
                         ))}
-                        <div className="flex justify-between p-4 text-slate-400">
-                            <span className="text-xs font-bold italic">Every Friday</span>
-                            <span className="text-[9px] font-black uppercase">Weekly Off</span>
+                        <div className="flex justify-between items-center p-6 border border-dashed border-slate-200 rounded-[2rem]">
+                            <span className="font-bold text-slate-400 text-xs">Weekly Off</span>
+                            <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest">Every Friday</span>
                         </div>
                     </div>
                 </div>
@@ -170,12 +180,11 @@ export default function Dashboard({ user }) {
     );
 }
 
-function ExecutiveStat({ label, value, isPositive, isNegative, isWarning }) {
+function StatCard({ label, value, color = "text-slate-900" }) {
     return (
-        <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-50 flex flex-col items-center text-center transition-all h-full hover:shadow-xl duration-500">
-            <div className={`w-1.5 h-6 rounded-full mb-6 ${isPositive ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)]' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-200'}`}></div>
-            <p className="text-[10px] font-black text-slate-300 uppercase tracking-[0.3em] mb-2">{label}</p>
-            <p className="text-4xl font-black text-slate-900 tracking-tighter">{value.toString().padStart(2, '0')}</p>
+        <div className="bg-white p-12 rounded-[3.5rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-2xl transition-all duration-500 group">
+            <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.5em] mb-6 group-hover:text-slate-400 transition-colors">{label}</p>
+            <p className={`text-6xl font-black tracking-tighter font-display ${color}`}>{value.toString().padStart(2, '0')}</p>
         </div>
     );
 }
