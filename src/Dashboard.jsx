@@ -82,7 +82,7 @@ export default function Dashboard({ user }) {
                 <div className="relative z-10 text-center lg:text-left">
                     <p className="text-[10px] font-black uppercase tracking-[0.5em] text-slate-300 mb-6">Lams Power Workspace</p>
                     <h1 className="text-5xl lg:text-8xl font-black text-slate-900 leading-[0.85] tracking-tighter">
-                        Assalamu<br/>
+                        Assalamu Alaikum<br/>
                         <span className="font-display italic text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-slate-500 to-slate-900">
                             {user?.name}
                         </span>
