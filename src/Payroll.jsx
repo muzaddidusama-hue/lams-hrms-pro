@@ -4,151 +4,142 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
 export default function Payroll({ user }) {
-    const [payslips, setPayslips] = useState([]);
+    const [payrollData, setPayrollData] = useState([]);
     const [selectedSlip, setSelectedSlip] = useState(null);
     const [isDownloading, setIsDownloading] = useState(false);
     const [loading, setLoading] = useState(true);
     const slipRef = useRef();
 
     useEffect(() => { 
-        fetchPayslips(); 
+        calculatePayroll(); 
     }, [user]);
 
-    const fetchPayslips = async () => {
+    const calculatePayroll = async () => {
         setLoading(true);
         try {
-            // ১. ডাটাবেজ থেকে ডাটা আনা
-            let query = supabase.from('payroll').select('*');
+            const now = new Date();
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+            const monthName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+            // ১. সব এমপ্লয়ী আনা
+            const { data: employees } = await supabase.from('employees').select('*');
             
+            // ২. এই মাসের এটেনডেন্স আনা
+            const { data: attendance } = await supabase.from('attendance')
+                .select('*')
+                .gte('date', startOfMonth)
+                .lte('date', endOfMonth);
+
+            // ৩. এই মাসের গ্রান্টেড ছুটি আনা
+            const { data: leaves } = await supabase.from('leaves')
+                .select('*')
+                .eq('status', 'Approved')
+                .gte('start_date', startOfMonth);
+
+            // ৪. শুক্রবার (Fridays) ক্যালকুলেট করা
+            let fridays = 0;
+            for (let d = new Date(startOfMonth); d <= new Date(endOfMonth); d.setDate(d.getDate() + 1)) {
+                if (d.getDay() === 5) fridays++;
+            }
+
+            const calculatedList = employees.map(emp => {
+                const presentDays = attendance.filter(a => a.emp_id === emp.emp_id).length;
+                const approvedLeaves = leaves.filter(l => l.emp_id === emp.emp_id).length;
+                
+                // মোট বেতনযোগ্য দিন = উপস্থিত + শুক্রবার + গ্রান্টেড ছুটি
+                const totalPaidDays = presentDays + fridays + approvedLeaves;
+                
+                // স্যালারি ক্যালকুলেশন (বেসিক স্যালারি ধরে)
+                const basic = parseFloat(emp.salary || 0);
+                const dailyRate = basic / 30;
+                const netSalary = Math.round(dailyRate * totalPaidDays);
+
+                return {
+                    emp_id: emp.emp_id,
+                    name: emp.name,
+                    month: monthName,
+                    basic_salary: basic,
+                    present: presentDays,
+                    leaves: approvedLeaves,
+                    fridays: fridays,
+                    net_salary: netSalary
+                };
+            });
+
             // যদি এডমিন না হয়, শুধু নিজের ডাটা দেখবে
             const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
-            if (!isAdmin) {
-                query = query.eq('emp_id', user.emp_id);
-            }
+            setPayrollData(isAdmin ? calculatedList : calculatedList.filter(p => p.emp_id === user.emp_id));
 
-            const { data, error } = await query;
-
-            if (error) {
-                console.error("Supabase Error:", error.message);
-            } else {
-                console.log("Fetched Payroll Data:", data); // ব্রাউজার কনসোলে ডাটা চেক করুন
-                setPayslips(data || []);
-            }
         } catch (err) {
-            console.error("Unexpected Error:", err);
+            console.error("Calculation Error:", err);
         } finally {
             setLoading(false);
         }
     };
 
     const handleDownload = async () => {
-        if (!selectedSlip || isDownloading) return;
         setIsDownloading(true);
-        try {
-            const element = slipRef.current;
-            const canvas = await html2canvas(element, { 
-                scale: 3, 
-                useCORS: true,
-                backgroundColor: "#ffffff" 
-            });
-            const imgData = canvas.toDataURL('image/png');
-            const pdf = new jsPDF('p', 'mm', 'a4');
-            const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-            
-            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-            pdf.save(`Payslip_${selectedSlip.name}_${selectedSlip.month}.pdf`);
-        } catch (err) {
-            console.error("PDF Download Error:", err);
-            alert("Could not generate PDF. Please try again.");
-        } finally {
-            setIsDownloading(false);
-        }
+        const canvas = await html2canvas(slipRef.current, { scale: 2, useCORS: true });
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+        pdf.save(`Payslip_${selectedSlip.name}.pdf`);
+        setIsDownloading(false);
     };
 
-    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Loading Payroll...</div>;
+    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase">Calculating Monthly Payroll...</div>;
 
     return (
-        <div className="max-w-6xl mx-auto space-y-10 animate-[fadeIn_0.5s_ease-out]">
-            <div className="flex justify-between items-end">
-                <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Payroll Center</h1>
-                <button onClick={fetchPayslips} className="text-[10px] font-black uppercase text-slate-400 hover:text-slate-900"><i className="fa-solid fa-rotate"></i> Refresh</button>
-            </div>
-            
+        <div className="max-w-6xl mx-auto space-y-10">
+            <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Lams Power Payroll</h1>
             <div className="bg-white rounded-[2.5rem] overflow-hidden border border-slate-100 shadow-sm overflow-x-auto">
-                <table className="w-full text-left min-w-[600px]">
-                    <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                <table className="w-full text-left min-w-[700px]">
+                    <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                         <tr>
                             <th className="p-6">Employee</th>
-                            <th className="p-6">Month</th>
+                            <th className="p-6 text-center">Present</th>
+                            <th className="p-6 text-center">Leave/Fri</th>
                             <th className="p-6">Net Salary</th>
                             <th className="p-6 text-center">Action</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                        {payslips.length > 0 ? (
-                            payslips.map(slip => (
-                                <tr key={slip.id} className="hover:bg-slate-50/50 transition-all">
-                                    <td className="p-6">
-                                        <p className="font-bold text-slate-800">{slip.name}</p>
-                                        <p className="text-[9px] text-slate-400 uppercase font-black tracking-widest">{slip.emp_id}</p>
-                                    </td>
-                                    <td className="p-6 text-slate-500 font-medium">{slip.month}</td>
-                                    <td className="p-6 font-black text-slate-900">৳{slip.net_salary}</td>
-                                    <td className="p-6 text-center">
-                                        <button onClick={() => setSelectedSlip(slip)} className="text-slate-900 font-black text-[10px] uppercase underline underline-offset-4 tracking-widest hover:text-blue-600 transition-all">View Payslip</button>
-                                    </td>
-                                </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan="4" className="p-20 text-center font-bold text-slate-300 uppercase tracking-widest">No payroll records found</td>
+                        {payrollData.map(p => (
+                            <tr key={p.emp_id} className="hover:bg-slate-50/50 transition-all">
+                                <td className="p-6 font-bold text-slate-700">{p.name}</td>
+                                <td className="p-6 text-center font-black text-green-600">{p.present} Days</td>
+                                <td className="p-6 text-center text-slate-500 font-medium">{p.leaves} L / {p.fridays} F</td>
+                                <td className="p-6 font-black text-slate-900">৳{p.net_salary}</td>
+                                <td className="p-6 text-center">
+                                    <button onClick={() => setSelectedSlip(p)} className="text-slate-900 font-black text-[10px] uppercase underline underline-offset-4 tracking-widest">Generate Slip</button>
+                                </td>
                             </tr>
-                        )}
+                        ))}
                     </tbody>
                 </table>
             </div>
 
-            {/* Payslip Modal */}
             {selectedSlip && (
-                <div className="fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 relative shadow-2xl my-10 animate-[zoomIn_0.3s_ease-out]">
+                <div className="fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-xl rounded-[3rem] p-10 relative shadow-2xl animate-[zoomIn_0.3s_ease-out]">
                         <button onClick={() => setSelectedSlip(null)} className="absolute top-8 right-8 text-slate-400 hover:text-slate-900"><i className="fa-solid fa-xmark text-xl"></i></button>
-                        
-                        <div ref={slipRef} className="p-10 bg-white border border-slate-100 rounded-[2.5rem]">
-                            <div className="flex justify-between items-start mb-10">
-                                <div>
-                                    <h2 className="text-xl font-black text-slate-900 uppercase tracking-tighter">Lams Power</h2>
-                                    <p className="text-[8px] text-slate-400 font-black uppercase tracking-[0.3em]">Official Payslip</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-[8px] text-slate-400 font-black uppercase tracking-widest">Period</p>
-                                    <p className="font-black text-slate-900">{selectedSlip.month}</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4 border-t border-slate-50 pt-8">
-                                <div className="flex justify-between"><span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Employee Name</span><span className="font-bold text-slate-800">{selectedSlip.name}</span></div>
-                                <div className="flex justify-between"><span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Basic Salary</span><span className="font-bold text-slate-800">৳{selectedSlip.basic_salary}</span></div>
-                                <div className="flex justify-between"><span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Allowances</span><span className="font-bold text-slate-800">৳{selectedSlip.allowances || 0}</span></div>
-                                <div className="flex justify-between border-b border-slate-50 pb-4"><span className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Deductions</span><span className="font-bold text-red-500">-৳{selectedSlip.deductions || 0}</span></div>
-                                <div className="flex justify-between pt-4"><span className="text-sm text-slate-900 font-black uppercase tracking-tighter">Net Payable</span><span className="text-2xl font-black text-slate-900">৳{selectedSlip.net_salary}</span></div>
+                        <div ref={slipRef} className="p-10 bg-white border border-slate-100 rounded-[2rem]">
+                            <h2 className="text-xl font-black text-slate-900 uppercase mb-8">Lams Power Payslip</h2>
+                            <div className="space-y-4 text-sm">
+                                <p className="flex justify-between border-b pb-2"><span>Month</span><span className="font-bold">{selectedSlip.month}</span></p>
+                                <p className="flex justify-between border-b pb-2"><span>Attendance</span><span className="font-bold">{selectedSlip.present} Days</span></p>
+                                <p className="flex justify-between border-b pb-2"><span>Fridays + Leaves</span><span className="font-bold">{selectedSlip.fridays + selectedSlip.leaves} Days</span></p>
+                                <p className="flex justify-between pt-6 text-2xl font-black"><span>Total</span><span>৳{selectedSlip.net_salary}</span></p>
                             </div>
                         </div>
-
-                        <button 
-                            onClick={handleDownload} 
-                            disabled={isDownloading}
-                            className={`w-full mt-8 h-16 rounded-[1.8rem] font-black text-[10px] uppercase tracking-[0.3em] shadow-xl transition-all ${isDownloading ? 'bg-slate-400' : 'bg-slate-900 text-white hover:scale-[1.02] active:scale-95'}`}
-                        >
-                            {isDownloading ? 'Processing PDF...' : 'Download PDF Payslip'}
-                        </button>
+                        <button onClick={handleDownload} disabled={isDownloading} className="w-full mt-8 h-16 bg-slate-900 text-white rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.3em]">{isDownloading ? 'Downloading...' : 'Download PDF'}</button>
                     </div>
                 </div>
             )}
-            <style>{`
-                @keyframes zoomIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-            `}</style>
+            <style>{`@keyframes zoomIn { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
         </div>
     );
 }
