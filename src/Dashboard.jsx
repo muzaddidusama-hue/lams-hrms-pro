@@ -16,10 +16,35 @@ export default function Dashboard({ user }) {
         return () => clearInterval(timer); 
     }, []);
 
-    useEffect(() => { fetchDashboardData(); }, [user]);
+    // 🚀 লাইভ আপডেট লজিক: ডাটাবেজে কোনো চেঞ্জ হলেই এই ফাংশনটি রান করবে
+    useEffect(() => {
+        fetchDashboardData();
+
+        if (isAdmin) {
+            // ১. এটেনডেন্স টেবিল মনিটর করা (প্রেজেন্ট/এবসেন্ট আপডেটের জন্য)
+            const attendanceChannel = supabase
+                .channel('attendance-db-changes')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
+                    fetchDashboardData();
+                })
+                .subscribe();
+
+            // ২. লিভ টেবিল মনিটর করা (পেন্ডিং রিকোয়েস্ট আপডেটের জন্য)
+            const leaveChannel = supabase
+                .channel('leaves-db-changes')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'leaves' }, () => {
+                    fetchDashboardData();
+                })
+                .subscribe();
+
+            return () => {
+                supabase.removeChannel(attendanceChannel);
+                supabase.removeChannel(leaveChannel);
+            };
+        }
+    }, [user, isAdmin]);
 
     const fetchDashboardData = async () => {
-        setLoading(true);
         const todayStr = new Date().toLocaleDateString('en-CA');
         try {
             if (isAdmin) {
@@ -34,6 +59,7 @@ export default function Dashboard({ user }) {
             }
             const { data: myAtt } = await supabase.from('attendance').select('*').eq('emp_id', user.emp_id).eq('date', todayStr).maybeSingle();
             if(myAtt) setTodaysLog(myAtt);
+            else setTodaysLog(null); // ক্লক আউটের পর রিসেট করার জন্য
         } catch (error) { console.error(error); } finally { setLoading(false); }
     };
 
@@ -67,24 +93,22 @@ export default function Dashboard({ user }) {
         } catch (err) { alert("Error!"); } finally { setLoadingAction(false); }
     };
 
-    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Loading...</div>;
+    if (loading) return <div className="p-20 text-center font-bold text-slate-300 animate-pulse uppercase tracking-[0.4em]">Initializing Core...</div>;
 
     return (
         <div className="max-w-7xl mx-auto space-y-10 animate-[fadeIn_0.6s_ease-out] pb-24 px-4">
             
-            {/* ফন্ট ইমপোর্ট করার স্টাইল */}
             <style>
                 {`@import url('https://fonts.googleapis.com/css2?family=Imperial+Script&display=swap');`}
             </style>
 
-            {/* 🌑 High-End Minimalist Hero Section */}
             <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.04)] border border-slate-50 relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-96 h-96 bg-slate-50 rounded-full -mr-32 -mt-32"></div>
                 <div className="relative z-10 flex flex-col lg:flex-row justify-between items-center gap-12">
                     <div className="text-center lg:text-left">
                         <div className="flex items-center justify-center lg:justify-start gap-3 mb-6">
                             <div className="w-1.5 h-1.5 bg-slate-900 rounded-full animate-pulse"></div>
-                            <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.5em]">Employee Management</span>
+                            <span className="text-slate-400 font-black text-[10px] uppercase tracking-[0.5em]">Live Monitoring On</span>
                         </div>
                         <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 leading-[1.2] tracking-tight">
                             Assalamu Alaikum,<br/>
@@ -102,24 +126,22 @@ export default function Dashboard({ user }) {
                 </div>
             </div>
 
-            {/* 📊 Executive Stat Cards */}
             {isAdmin && (
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                    <ExecutiveStat label="Staff Force" value={stats.total} />
-                    <ExecutiveStat label="Active Now" value={stats.present} isPositive />
-                    <ExecutiveStat label="Off Duty" value={stats.absent} isNegative />
-                    <ExecutiveStat label="Pending" value={stats.leaves} isWarning />
+                    <ExecutiveStat label="Total Staff" value={stats.total} />
+                    <ExecutiveStat label="Present" value={stats.present} isPositive />
+                    <ExecutiveStat label="Absent" value={stats.absent} isNegative />
+                    <ExecutiveStat label="Pending Leaves" value={stats.leaves} isWarning />
                 </div>
             )}
 
-            {/* ⏱️ Duty Control Hub */}
             <div className="bg-white rounded-[3rem] p-10 md:p-14 border border-slate-100 shadow-[0_10px_40px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-center justify-between gap-12">
                 <div className="flex items-center gap-8">
                     <div className="w-20 h-20 bg-slate-950 rounded-[2.5rem] flex items-center justify-center text-white shadow-2xl">
                         <i className="fa-solid fa-hourglass-start text-2xl"></i>
                     </div>
                     <div>
-                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Shift Duration</p>
+                        <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] mb-1">Session Duration</p>
                         <h2 className="text-4xl font-black text-slate-900 tracking-tighter">{workDuration}</h2>
                     </div>
                 </div>
