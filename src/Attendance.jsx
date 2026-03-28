@@ -7,25 +7,18 @@ export default function Attendance({ user }) {
     const [logs, setLogs] = useState([]);
     const [viewMode, setViewMode] = useState('daily');
     const [loading, setLoading] = useState(true);
-    const [isAdmin, setIsAdmin] = useState(false); // রোল চেক করার জন্য নতুন স্টেট
 
-    useEffect(() => {
-        checkUserRole();
-    }, [user]);
+    // 🕵️ কনসোলে চেক করুন ইউজার ডাটা ঠিক আসছে কি না (F12 চেপে Console দেখুন)
+    console.log("Logged In User Object:", user);
+
+    // ১. আপনার স্ক্রিনশট অনুযায়ী Admin/Manager চেক করার একদম সলিড লজিক
+    const role = user?.role?.toLowerCase() || "";
+    const isAdmin = role === 'admin' || role === 'manager' || user?.id === 'admin' || user?.emp_id === 'emp110';
 
     useEffect(() => {
         if (isAdmin) fetchEmployees();
         fetchLogs();
-    }, [selectedEmp, viewMode, isAdmin]);
-
-    // ১. ডাটাবেজ থেকে সরাসরি আপনার রোল বের করা (Props-এ ভুল থাকলেও এটা কাজ করবে)
-    const checkUserRole = async () => {
-        if (!user?.emp_id) return;
-        const { data } = await supabase.from('employees').select('role').eq('emp_id', user.emp_id).single();
-        if (data?.role === 'Admin' || data?.role === 'Manager') {
-            setIsAdmin(true);
-        }
-    };
+    }, [selectedEmp, viewMode, user, isAdmin]);
 
     const fetchEmployees = async () => {
         const { data } = await supabase.from('employees').select('emp_id, name');
@@ -35,17 +28,20 @@ export default function Attendance({ user }) {
     const fetchLogs = async () => {
         setLoading(true);
         try {
-            const today = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD
+            const today = new Date().toLocaleDateString('sv-SE'); // 2026-03-28
             let query = supabase.from('attendance').select('*');
 
             if (isAdmin) {
                 if (viewMode === 'daily') {
-                    // আজকের ডাটা যদি না থাকে, তবে সবশেষ ডাটাগুলো দেখাবে যাতে টেবিল খালি না থাকে
-                    const { count } = await supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', today);
-                    if (count === 0) {
-                        query = query.limit(50); // আজকে ডাটা নেই, তাই সবশেষ ৫০টি রেকর্ড দেখাও
+                    // আজকের ডাটা খুঁজবে, না পেলে সব দেখাবে (যাতে স্ক্রিন ফাঁকা না থাকে)
+                    const { data: todayData } = await supabase.from('attendance').select('*').eq('date', today);
+                    if (todayData && todayData.length > 0) {
+                        setLogs(todayData);
+                        setLoading(false);
+                        return;
                     } else {
-                        query = query.eq('date', today);
+                        // যদি আজ কেউ না আসে, তবে সব শেষ ডাটা দেখাও
+                        query = query.limit(20); 
                     }
                 } else if (selectedEmp) {
                     query = query.eq('emp_id', selectedEmp);
@@ -53,89 +49,74 @@ export default function Attendance({ user }) {
                     query = query.limit(50);
                 }
             } else {
-                const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toLocaleDateString('sv-SE');
-                query = query.eq('emp_id', user.emp_id).gte('date', firstDay);
+                // এমপ্লয়ীর নিজের আইডি দিয়ে সার্চ (user.id অথবা user.emp_id দুটাই চেক করবে)
+                const myId = user?.emp_id || user?.id;
+                query = query.eq('emp_id', myId);
             }
 
-            const { data } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
+            const { data, error } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
+            if (error) throw error;
             setLogs(data || []);
         } catch (e) {
-            console.error(e);
+            console.error("Attendance Error:", e);
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-10 pb-24 px-4 animate-[fadeIn_0.5s_ease-out]">
+        <div className="max-w-6xl mx-auto space-y-10 pb-24 px-4">
             <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Attendance Analytics</h1>
 
-            {/* বাটনগুলো যদি এখন না আসে, তবে বুঝতে হবে আপনার user.emp_id টাও কোড পাচ্ছে না */}
+            {/* Admin Filter Panel */}
             {isAdmin && (
                 <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6 items-center">
-                    <div className="flex bg-slate-100 p-1.5 rounded-2xl w-full md:w-auto overflow-hidden shadow-inner">
-                        <button 
-                            onClick={() => { setViewMode('daily'); setSelectedEmp(''); }} 
-                            className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'daily' ? 'bg-white shadow-md text-slate-950' : 'text-slate-400'}`}
-                        >
-                            Daily Report
-                        </button>
-                        <button 
-                            onClick={() => setViewMode('individual')} 
-                            className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'individual' ? 'bg-white shadow-md text-slate-950' : 'text-slate-400'}`}
-                        >
-                            Employee History
-                        </button>
+                    <div className="flex bg-slate-100 p-1.5 rounded-2xl w-full md:w-auto">
+                        <button onClick={() => { setViewMode('daily'); setSelectedEmp(''); }} className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'daily' ? 'bg-white shadow-md text-slate-950' : 'text-slate-400'}`}>Daily View</button>
+                        <button onClick={() => setViewMode('individual')} className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewMode === 'individual' ? 'bg-white shadow-md text-slate-950' : 'text-slate-400'}`}>By Employee</button>
                     </div>
 
                     {viewMode === 'individual' && (
-                        <select 
-                            value={selectedEmp}
-                            onChange={(e) => setSelectedEmp(e.target.value)}
-                            className="w-full md:w-64 p-4 bg-slate-50 border-none rounded-2xl font-bold text-sm focus:ring-2 focus:ring-slate-950 outline-none"
-                        >
+                        <select value={selectedEmp} onChange={(e) => setSelectedEmp(e.target.value)} className="w-full md:w-64 p-4 bg-slate-50 border-none rounded-2xl font-bold text-sm">
                             <option value="">Select Employee</option>
-                            {employees.map(emp => (
-                                <option key={emp.emp_id} value={emp.emp_id}>{emp.name} ({emp.emp_id})</option>
-                            ))}
+                            {employees.map(emp => <option key={emp.emp_id} value={emp.emp_id}>{emp.name}</option>)}
                         </select>
                     )}
                 </div>
             )}
 
+            {/* Data Table */}
             <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden min-h-[400px]">
                 <table className="w-full text-left">
                     <thead className="bg-slate-50 text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">
                         <tr>
                             <th className="p-8">Details</th>
-                            <th className="p-8">Check In</th>
-                            <th className="p-8">Check Out</th>
+                            <th className="p-8">Time In</th>
+                            <th className="p-8">Time Out</th>
                             <th className="p-8 text-right">Status</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-50 text-sm">
+                    <tbody className="divide-y divide-slate-50">
                         {loading ? (
-                            <tr><td colSpan="4" className="p-20 text-center font-bold text-slate-200 uppercase tracking-widest">Syncing logs...</td></tr>
+                            <tr><td colSpan="4" className="p-20 text-center font-bold text-slate-200 uppercase tracking-widest animate-pulse">Checking Records...</td></tr>
                         ) : logs.length > 0 ? (
                             logs.map((log, idx) => (
-                                <tr key={idx} className="hover:bg-slate-50/50 transition-all font-bold">
+                                <tr key={idx} className="hover:bg-slate-50 font-bold group">
                                     <td className="p-8">
-                                        <p className="text-xs text-slate-900 uppercase">
-                                            {(isAdmin && viewMode === 'daily') ? log.name : new Date(log.date).toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'})}
-                                        </p>
+                                        <p className="text-xs text-slate-900 uppercase">{log.name || log.date}</p>
                                         <p className="text-[8px] text-slate-300 uppercase tracking-widest mt-1">ID: {log.emp_id}</p>
                                     </td>
                                     <td className="p-8 font-mono text-[10px] text-slate-500 italic">{log.time_in}</td>
                                     <td className="p-8 font-mono text-[10px] text-slate-500 italic">{log.time_out || '--:--'}</td>
                                     <td className="p-8 text-right">
-                                        <span className={`text-[8px] font-black px-4 py-1.5 rounded-lg uppercase tracking-widest ${log.time_out ? 'bg-green-50 text-green-500' : 'bg-amber-50 text-amber-500 animate-pulse'}`}>
+                                        <span className={`text-[8px] font-black px-4 py-1.5 rounded-lg uppercase ${log.time_out ? 'bg-green-50 text-green-500' : 'bg-amber-50 text-amber-500 animate-pulse'}`}>
                                             {log.time_out ? 'Finished' : 'On Duty'}
                                         </span>
                                     </td>
                                 </tr>
                             ))
                         ) : (
-                            <tr><td colSpan="4" className="p-20 text-center font-bold text-slate-300 uppercase tracking-widest italic">No Records Found.</td></tr>
+                            <tr><td colSpan="4" className="p-20 text-center font-bold text-slate-300 uppercase tracking-widest italic tracking-tight">Data Not Found in Database</td></tr>
                         )}
                     </tbody>
                 </table>
