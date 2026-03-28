@@ -4,122 +4,94 @@ import { supabase } from './supabase';
 export default function Holidays({ user }) {
     const [holidays, setHolidays] = useState([]);
     const [occasion, setOccasion] = useState('');
-    const [date, setDate] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState(''); // নতুন: শেষ তারিখের জন্য
     const [loading, setLoading] = useState(false);
     
-    // --- এক্সেস কন্ট্রোল (Admin অথবা Manager হতে হবে) ---
     const userRole = user?.role?.toLowerCase() || '';
-    const hasPermission = userRole === 'admin' || userRole === 'manager' || user?.id?.toLowerCase() === 'admin';
+    const hasPermission = userRole === 'admin' || userRole === 'manager';
 
-    useEffect(() => {
-        fetchHolidays();
-    }, []);
+    useEffect(() => { fetchHolidays(); }, []);
 
     const fetchHolidays = async () => {
-        const { data, error } = await supabase
-            .from('holidays')
-            .select('*')
-            .order('date', { ascending: true });
-        
-        if (!error) setHolidays(data || []);
+        const { data } = await supabase.from('holidays').select('*').order('date', { ascending: true });
+        setHolidays(data || []);
     };
 
     const handleAddHoliday = async (e) => {
         e.preventDefault();
-        if (!hasPermission) return alert("You don't have permission to add holidays!");
-        if (!occasion || !date) return;
-
         setLoading(true);
+        
         try {
-            const { error } = await supabase
-                .from('holidays')
-                .insert([{ occasion: occasion, date: date }]);
+            let holidayEntries = [];
+            
+            if (endDate && endDate !== startDate) {
+                // টানা ছুটির লজিক
+                let curr = new Date(startDate);
+                let last = new Date(endDate);
+                while (curr <= last) {
+                    holidayEntries.push({ occasion, date: curr.toISOString().split('T')[0] });
+                    curr.setDate(curr.getDate() + 1);
+                }
+            } else {
+                // একদিনের ছুটি
+                holidayEntries.push({ occasion, date: startDate });
+            }
 
+            const { error } = await supabase.from('holidays').insert(holidayEntries);
             if (error) throw error;
 
-            setOccasion('');
-            setDate('');
+            setOccasion(''); setStartDate(''); setEndDate('');
             fetchHolidays();
-            alert("Holiday Added Successfully!");
+            alert("Holidays Updated Successfully!");
         } catch (error) {
-            alert("Error: " + error.message);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const deleteHoliday = async (id) => {
-        if (!hasPermission) return alert("Unauthorized access!");
-        if (!confirm("Delete this holiday?")) return;
-        const { error } = await supabase.from('holidays').delete().eq('id', id);
-        if (!error) fetchHolidays();
+            alert(error.message);
+        } finally { setLoading(false); }
     };
 
     return (
-        <div className="max-w-4xl mx-auto space-y-10 p-4 animate-[fadeIn_0.5s_ease-out] pb-20">
+        <div className="max-w-4xl mx-auto space-y-10 p-4 pb-20">
             <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Holiday Management</h1>
             
-            {/* 🛠️ Restricted Admin/Manager Panel */}
-            {hasPermission ? (
-                <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-6 italic">Add New Holiday (Admin/Manager Only)</p>
-                    <form onSubmit={handleAddHoliday} className="flex flex-col md:flex-row gap-4">
-                        <input 
-                            type="text" 
-                            placeholder="Occasion Name" 
-                            value={occasion} 
-                            onChange={e => setOccasion(e.target.value)} 
-                            required 
-                            className="flex-1 p-5 bg-slate-50 rounded-2xl border-none font-bold text-sm focus:ring-2 focus:ring-slate-950 transition-all" 
-                        />
-                        <input 
-                            type="date" 
-                            value={date} 
-                            onChange={e => setDate(e.target.value)} 
-                            required 
-                            className="p-5 bg-slate-50 rounded-2xl border-none font-bold text-sm focus:ring-2 focus:ring-slate-950 transition-all" 
-                        />
-                        <button 
-                            disabled={loading} 
-                            className="bg-slate-950 text-white px-10 py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all"
-                        >
-                            {loading ? 'Adding...' : 'Add Holiday'}
+            {hasPermission && (
+                <div className="bg-white p-10 rounded-[2.5rem] border border-slate-100 shadow-sm">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mb-6">Add Holidays (Range Supported)</p>
+                    <form onSubmit={handleAddHoliday} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input type="text" placeholder="Occasion (e.g. Eid-ul-Fitr)" value={occasion} onChange={e => setOccasion(e.target.value)} required className="md:col-span-2 p-5 bg-slate-50 rounded-2xl border-none font-bold text-sm" />
+                        <div className="flex flex-col gap-2">
+                            <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Start Date</label>
+                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} required className="p-5 bg-slate-50 rounded-2xl border-none font-bold text-sm" />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <label className="text-[9px] font-black text-slate-400 uppercase ml-2">End Date (Optional)</label>
+                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-5 bg-slate-50 rounded-2xl border-none font-bold text-sm" />
+                        </div>
+                        <button disabled={loading} className="md:col-span-2 bg-slate-950 text-white py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl">
+                            {loading ? 'Processing...' : 'Sync Holidays'}
                         </button>
                     </form>
                 </div>
-            ) : (
-                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 flex items-center gap-4 text-slate-400 italic">
-                    <i className="fa-solid fa-circle-info"></i>
-                    <p className="text-xs font-bold uppercase tracking-widest">You can only view the holiday list.</p>
-                </div>
             )}
 
-            {/* 📜 List Area */}
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-                <table className="w-full text-left">
-                    <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                        <tr>
-                            <th className="p-8">Occasion</th>
-                            <th className="p-8">Date</th>
-                            {hasPermission && <th className="p-8 text-right">Action</th>}
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                        {holidays.map(h => (
-                            <tr key={h.id} className="hover:bg-slate-50 font-bold group">
-                                <td className="p-8 text-slate-800">{h.occasion}</td>
-                                <td className="p-8 text-slate-500 font-medium">{h.date}</td>
-                                {hasPermission && (
-                                    <td className="p-8 text-right">
-                                        <button onClick={() => deleteHoliday(h.id)} className="text-red-400 hover:text-red-600 transition-colors">
-                                            <i className="fa-solid fa-trash-can"></i>
-                                        </button>
-                                    </td>
-                                )}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
+                <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Scheduled Holidays</span>
+                </div>
+                <div className="divide-y divide-slate-50">
+                    {holidays.map(h => (
+                        <div key={h.id} className="p-8 flex justify-between items-center group hover:bg-slate-50 transition-all">
+                            <div>
+                                <h4 className="font-bold text-slate-900 text-sm uppercase">{h.occasion}</h4>
+                                <p className="text-[10px] text-slate-400 font-mono mt-1">{h.date}</p>
+                            </div>
+                            {hasPermission && (
+                                <button onClick={async () => { if(confirm('Delete?')) { await supabase.from('holidays').delete().eq('id', h.id); fetchHolidays(); } }} className="text-slate-200 hover:text-red-500 transition-colors p-2">
+                                    <i className="fa-solid fa-trash-can text-xs"></i>
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     );
