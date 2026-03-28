@@ -1,24 +1,22 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-export default function Attendance({ user }) {
+export default function Attendance() { // প্রপ্স (user) আর লাগবে না
     const [employees, setEmployees] = useState([]);
     const [selectedEmp, setSelectedEmp] = useState('');
     const [logs, setLogs] = useState([]);
     const [viewMode, setViewMode] = useState('daily');
     const [loading, setLoading] = useState(true);
 
-    // 🕵️ কনসোলে চেক করুন ইউজার ডাটা ঠিক আসছে কি না (F12 চেপে Console দেখুন)
-    console.log("Logged In User Object:", user);
-
-    // ১. আপনার স্ক্রিনশট অনুযায়ী Admin/Manager চেক করার একদম সলিড লজিক
-    const role = user?.role?.toLowerCase() || "";
-    const isAdmin = role === 'admin' || role === 'manager' || user?.id === 'admin' || user?.emp_id === 'emp110';
+    // ১. প্রপ্সের ওপর ভরসা না করে সরাসরি মেমোরি থেকে ইউজার বের করা
+    const savedUser = JSON.parse(localStorage.getItem('lams_user'));
+    const role = savedUser?.role?.toLowerCase() || "";
+    const isAdmin = role === 'admin' || role === 'manager' || savedUser?.id === 'admin' || savedUser?.emp_id === 'emp110';
 
     useEffect(() => {
         if (isAdmin) fetchEmployees();
         fetchLogs();
-    }, [selectedEmp, viewMode, user, isAdmin]);
+    }, [selectedEmp, viewMode, isAdmin]);
 
     const fetchEmployees = async () => {
         const { data } = await supabase.from('employees').select('emp_id, name');
@@ -28,47 +26,39 @@ export default function Attendance({ user }) {
     const fetchLogs = async () => {
         setLoading(true);
         try {
-            const today = new Date().toLocaleDateString('sv-SE'); // 2026-03-28
+            const today = new Date().toLocaleDateString('sv-SE'); 
             let query = supabase.from('attendance').select('*');
 
             if (isAdmin) {
                 if (viewMode === 'daily') {
-                    // আজকের ডাটা খুঁজবে, না পেলে সব দেখাবে (যাতে স্ক্রিন ফাঁকা না থাকে)
-                    const { data: todayData } = await supabase.from('attendance').select('*').eq('date', today);
-                    if (todayData && todayData.length > 0) {
-                        setLogs(todayData);
-                        setLoading(false);
-                        return;
-                    } else {
-                        // যদি আজ কেউ না আসে, তবে সব শেষ ডাটা দেখাও
-                        query = query.limit(20); 
-                    }
+                    // আজকের ডাটা না থাকলে জাস্ট লেটেস্ট গুলো দেখাবে যাতে সাদা না লাগে
+                    const { count } = await supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', today);
+                    if (count === 0) { query = query.limit(50); } 
+                    else { query = query.eq('date', today); }
                 } else if (selectedEmp) {
                     query = query.eq('emp_id', selectedEmp);
                 } else {
                     query = query.limit(50);
                 }
             } else {
-                // এমপ্লয়ীর নিজের আইডি দিয়ে সার্চ (user.id অথবা user.emp_id দুটাই চেক করবে)
-                const myId = user?.emp_id || user?.id;
-                query = query.eq('emp_id', myId);
+                // এমপ্লয়ীর নিজের আইডি দিয়ে সার্চ
+                query = query.eq('emp_id', savedUser?.emp_id);
             }
 
-            const { data, error } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
-            if (error) throw error;
+            const { data } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
             setLogs(data || []);
         } catch (e) {
-            console.error("Attendance Error:", e);
+            console.error(e);
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="max-w-6xl mx-auto space-y-10 pb-24 px-4">
+        <div className="max-w-6xl mx-auto space-y-10 pb-24 px-4 animate-[fadeIn_0.5s_ease-out]">
             <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">Attendance Analytics</h1>
 
-            {/* Admin Filter Panel */}
+            {/* Admin Controls */}
             {isAdmin && (
                 <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6 items-center">
                     <div className="flex bg-slate-100 p-1.5 rounded-2xl w-full md:w-auto">
@@ -85,29 +75,28 @@ export default function Attendance({ user }) {
                 </div>
             )}
 
-            {/* Data Table */}
             <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden min-h-[400px]">
                 <table className="w-full text-left">
                     <thead className="bg-slate-50 text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">
                         <tr>
                             <th className="p-8">Details</th>
-                            <th className="p-8">Time In</th>
-                            <th className="p-8">Time Out</th>
+                            <th className="p-8">Check In</th>
+                            <th className="p-8">Check Out</th>
                             <th className="p-8 text-right">Status</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
                         {loading ? (
-                            <tr><td colSpan="4" className="p-20 text-center font-bold text-slate-200 uppercase tracking-widest animate-pulse">Checking Records...</td></tr>
+                            <tr><td colSpan="4" className="p-20 text-center font-bold text-slate-200 uppercase tracking-widest animate-pulse">Syncing logs...</td></tr>
                         ) : logs.length > 0 ? (
                             logs.map((log, idx) => (
-                                <tr key={idx} className="hover:bg-slate-50 font-bold group">
+                                <tr key={idx} className="hover:bg-slate-50 transition-all font-bold">
                                     <td className="p-8">
-                                        <p className="text-xs text-slate-900 uppercase">{log.name || log.date}</p>
-                                        <p className="text-[8px] text-slate-300 uppercase tracking-widest mt-1">ID: {log.emp_id}</p>
+                                        <p className="text-xs text-slate-900 uppercase">{log.name || 'Admin'}</p>
+                                        <p className="text-[8px] text-slate-300 uppercase tracking-widest mt-1">{new Date(log.date).toLocaleDateString('en-GB')} • ID: {log.emp_id}</p>
                                     </td>
-                                    <td className="p-8 font-mono text-[10px] text-slate-500 italic">{log.time_in}</td>
-                                    <td className="p-8 font-mono text-[10px] text-slate-500 italic">{log.time_out || '--:--'}</td>
+                                    <td className="p-8 font-mono text-[10px] text-slate-500">{log.time_in}</td>
+                                    <td className="p-8 font-mono text-[10px] text-slate-500">{log.time_out || '--:--'}</td>
                                     <td className="p-8 text-right">
                                         <span className={`text-[8px] font-black px-4 py-1.5 rounded-lg uppercase ${log.time_out ? 'bg-green-50 text-green-500' : 'bg-amber-50 text-amber-500 animate-pulse'}`}>
                                             {log.time_out ? 'Finished' : 'On Duty'}
@@ -116,7 +105,7 @@ export default function Attendance({ user }) {
                                 </tr>
                             ))
                         ) : (
-                            <tr><td colSpan="4" className="p-20 text-center font-bold text-slate-300 uppercase tracking-widest italic tracking-tight">Data Not Found in Database</td></tr>
+                            <tr><td colSpan="4" className="p-20 text-center font-bold text-slate-300 uppercase tracking-widest italic tracking-tight">No Logs In Database</td></tr>
                         )}
                     </tbody>
                 </table>
