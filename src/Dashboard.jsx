@@ -1,273 +1,383 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { Geolocation } from '@capacitor/geolocation'; // জিপিএস এর জন্য
+
+// দূরত্ব মাপার গাণিতিক সূত্র (Haversine Formula)
+const getDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // পৃথিবীর ব্যাসার্ধ (মিটারে)
+    const p1 = lat1 * Math.PI/180;
+    const p2 = lat2 * Math.PI/180;
+    const deltaP = (lat2-lat1) * Math.PI/180;
+    const deltaLon = (lon2-lon1) * Math.PI/180;
+    const a = Math.sin(deltaP/2) * Math.sin(deltaP/2) +
+              Math.cos(p1) * Math.cos(p2) *
+              Math.sin(deltaLon/2) * Math.sin(deltaLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+};
 
 export default function Dashboard({ user }) {
-    const [currentTime, setCurrentTime] = useState('00:00:00');
-    const [todaysLog, setTodaysLog] = useState(null);
-    const [workDuration, setWorkDuration] = useState('00h 00m 00s');
+    const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString('en-US', { hour12: false }));
+    const [stats, setStats] = useState({ total: 0, activeNow: 0, absent: 0, leaves: 0 });
+    const [monthlyCount, setMonthlyCount] = useState(0);
     const [notices, setNotices] = useState([]);
     const [holidays, setHolidays] = useState([]);
-    const [loadingAction, setLoadingAction] = useState(false);
+    const [todaysLog, setTodaysLog] = useState(null);
+    const [loading, setLoading] = useState(true);
 
-    // এডমিন চার্টের স্টেট
-    const [attendanceStats, setAttendanceStats] = useState([]);
-    const [loginGraphData, setLoginGraphData] = useState([]);
+    // Geo-fencing & Remote States
+    const [geoConfig, setGeoConfig] = useState({ lat: 0, lng: 0, radius: 100 });
+    const [isRemoteEmp, setIsRemoteEmp] = useState(false);
+    const [hasApprovedPass, setHasApprovedPass] = useState(false);
+    const [verifyingGeo, setVerifyingGeo] = useState(false);
+
+    // Modals
+    const [showReqModal, setShowReqModal] = useState(false);
+    const [showPhotoModal, setShowPhotoModal] = useState(false);
+    const [currentAction, setCurrentAction] = useState(''); // 'clock_in' or 'clock_out'
+    const [photoFile, setPhotoFile] = useState(null);
+    const [uploading, setUploading] = useState(false);
+
+    // Request Form States
+    const [reqDate, setReqDate] = useState('');
+    const [reqPlace, setReqPlace] = useState('');
+    const [reqPurpose, setReqPurpose] = useState('');
+
     const isAdmin = user?.role?.toLowerCase().includes('admin') || user?.id?.toLowerCase() === 'admin';
 
-    // রিয়েল-টাইম ঘড়ি
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false })), 1000);
-        return () => clearInterval(timer); 
+        fetchDashboardData();
+        return () => clearInterval(timer);
     }, []);
 
-    // ডাটা আনা
-    useEffect(() => {
-        if(user) fetchDashboardData();
-    }, [user]);
-
     const fetchDashboardData = async () => {
-        const todayStr = new Date().toLocaleDateString('en-CA');
-        
-        // নিজের এটেনডেন্স
-        const { data: attData } = await supabase.from('attendance').select('*').eq('date', todayStr).eq('emp_id', user.emp_id).single();
-        if(attData) setTodaysLog(attData);
-
-        // নোটিশ ও হলিডে
-        const { data: noticeData } = await supabase.from('notices').select('*').order('id', { ascending: false });
-        setNotices(noticeData || []);
-
-        const { data: holidayData } = await supabase.from('holidays').select('*');
-        if (holidayData) {
-            const today = new Date(); today.setHours(0,0,0,0);
-            const nextWeek = new Date(); nextWeek.setDate(today.getDate() + 7);
-            const displayHolidays = [];
-            for(let i=0; i<7; i++) { 
-                const d = new Date(); d.setDate(today.getDate() + i); 
-                if(d.getDay() === 5) displayHolidays.push({ date: d.toISOString().split('T')[0], occasion: "Weekend (Friday)" }); 
-            }
-            holidayData.forEach(h => { 
-                const hDate = new Date(h.date); 
-                if(hDate >= today && hDate <= nextWeek) displayHolidays.push({ date: h.date, occasion: h.occasion }); 
-            });
-            displayHolidays.sort((a,b) => new Date(a.date) - new Date(b.date));
-            setHolidays(displayHolidays);
-        }
-
-        // 📊 এডমিনের জন্য গ্রাফের ডাটা ক্যালকুলেশন
-        if (isAdmin) {
-            const [empRes, allAttRes] = await Promise.all([
-                supabase.from('employees').select('emp_id'),
-                supabase.from('attendance').select('*').eq('date', todayStr)
-            ]);
-
-            const totalEmp = empRes.data?.length || 0;
-            const allAtt = allAttRes.data || [];
-            const present = allAtt.length;
-            const absent = Math.max(0, totalEmp - present);
-
-            // পাই চার্ট ডাটা
-            setAttendanceStats([
-                { name: 'Present', value: present, color: '#10b981' }, // Green
-                { name: 'Absent', value: absent, color: '#f43f5e' }    // Red
-            ]);
-
-            // বার চার্ট ডাটা (লগইন টাইম)
-            const graphData = allAtt.map(a => {
-                const [h, m] = a.time_in.split(':');
-                const timeDecimal = parseInt(h) + (parseInt(m) / 60); // 09:30 কে 9.5 বানানো হচ্ছে গ্রাফের জন্য
-                
-                // 12 hour format for display
-                const ampm = parseInt(h) >= 12 ? 'PM' : 'AM';
-                const displayH = parseInt(h) % 12 || 12;
-                const displayTime = `${displayH}:${m} ${ampm}`;
-
-                return { 
-                    name: a.name.split(' ')[0], // শুধু ফাস্ট নেম
-                    hourVal: parseFloat(timeDecimal.toFixed(2)),
-                    exactTime: displayTime 
-                };
-            });
-            setLoginGraphData(graphData);
-        }
-    };
-
-    useEffect(() => {
-        let interval;
-        if (todaysLog && todaysLog.time_in && !todaysLog.time_out) {
-            const todayStr = new Date().toLocaleDateString('en-CA');
-            const start = new Date(`${todayStr}T${todaysLog.time_in}`);
-            interval = setInterval(() => {
-                const diff = new Date() - start;
-                const h = Math.floor(diff / 3600000);
-                const m = Math.floor((diff % 3600000) / 60000);
-                const s = Math.floor((diff % 60000) / 1000);
-                setWorkDuration(`${h.toString().padStart(2,'0')}h ${m.toString().padStart(2,'0')}m ${s.toString().padStart(2,'0')}s`);
-            }, 1000);
-        } else if (todaysLog && todaysLog.time_out) {
-            setWorkDuration("00h 00m 00s");
-        }
-        return () => clearInterval(interval);
-    }, [todaysLog]);
-
-    const handleAttendance = async (action) => {
-        setLoadingAction(true);
-        const now = new Date();
-        const dateStr = now.toLocaleDateString('en-CA');
-        const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
         try {
-            if (action === 'clock_in') {
-                await supabase.from('attendance').insert([{ emp_id: user.emp_id, name: user.name, date: dateStr, time_in: timeStr }]);
-            } else {
-                await supabase.from('attendance').update({ time_out: timeStr }).eq('emp_id', user.emp_id).eq('date', dateStr);
+            const now = new Date();
+            const todayStr = now.toLocaleDateString('en-CA');
+            const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString('en-CA');
+            
+            // Fetch Geo Config & Employee Profile
+            const [geoRes, profileRes, passRes] = await Promise.all([
+                supabase.from('company_settings').select('*').eq('id', 1).single(),
+                supabase.from('employees').select('is_remote').eq('emp_id', user.emp_id).single(),
+                supabase.from('outside_requests').select('status').eq('emp_id', user.emp_id).eq('date', todayStr).eq('status', 'Approved').maybeSingle()
+            ]);
+
+            if (geoRes.data) setGeoConfig({ lat: geoRes.data.office_lat, lng: geoRes.data.office_lng, radius: geoRes.data.office_radius });
+            if (profileRes.data) setIsRemoteEmp(profileRes.data.is_remote);
+            if (passRes.data) setHasApprovedPass(true);
+
+            // Fetch Stats
+            const [empRes, activeRes, totalPresentRes, noticeRes, holidayRes] = await Promise.all([
+                supabase.from('employees').select('*', { count: 'exact', head: true }),
+                supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', todayStr).is('time_out', null),
+                supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', todayStr),
+                supabase.from('notices').select('*').order('date', { ascending: false }).limit(2),
+                supabase.from('holidays').select('*').gte('date', todayStr).limit(3)
+            ]);
+
+            setStats({
+                total: empRes.count || 0,
+                activeNow: activeRes.count || 0,
+                absent: Math.max(0, (empRes.count || 0) - (totalPresentRes.count || 0)),
+                leaves: 0 
+            });
+
+            if (!isAdmin) {
+                const { count } = await supabase.from('attendance')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('emp_id', user.emp_id)
+                    .gte('date', firstDay);
+                setMonthlyCount(count || 0);
             }
-            await fetchDashboardData(); 
-        } catch (error) { alert("Connection Error"); } finally { setLoadingAction(false); }
+
+            const { data: myAtt } = await supabase.from('attendance').select('*').eq('emp_id', user.emp_id).eq('date', todayStr).maybeSingle();
+            setTodaysLog(myAtt || null);
+            setNotices(noticeRes.data || []);
+            setHolidays(holidayRes.data || []);
+
+        } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
-    // Custom Tooltip for Bar Chart
-    const CustomTooltip = ({ active, payload }) => {
-        if (active && payload && payload.length) {
-            return (
-                <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-700 text-xs">
-                    <p className="font-bold mb-1">{payload[0].payload.name}</p>
-                    <p className="text-orange-400">Clock In: {payload[0].payload.exactTime}</p>
-                </div>
-            );
+    // 📍 ১. মেইন এটেনডেন্স বাটন ক্লিক করলে জিও-লোকেশন চেক হবে
+    const handleDutyCheck = async (action) => {
+        setVerifyingGeo(true);
+        try {
+            const coordinates = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+            const lat = coordinates.coords.latitude;
+            const lng = coordinates.coords.longitude;
+            
+            const distance = getDistance(lat, lng, geoConfig.lat, geoConfig.lng);
+            
+            if (distance <= geoConfig.radius) {
+                // অফিসের ভেতরে থাকলে সরাসরি বায়োমেট্রিক
+                executeBiometricAuth(action, lat, lng, null);
+            } else {
+                // অফিসের বাইরে থাকলে পারমিশন চেক
+                if (isRemoteEmp || hasApprovedPass) {
+                    setCurrentAction(action);
+                    setShowPhotoModal(true); // ছবি তোলার জন্য মডাল ওপেন হবে
+                } else {
+                    alert(`You are ${Math.round(distance)} meters away from the office! Please connect from the office or submit an 'Outside Duty Request'.`);
+                }
+            }
+        } catch (err) {
+            alert("Turn on GPS/Location to check in!");
         }
-        return null;
+        setVerifyingGeo(false);
     };
+
+    // 📸 ২. রিমোট ইউজারদের ছবি আপলোড ও চেক-ইন
+    const handleRemoteCheckinWithPhoto = async (e) => {
+        e.preventDefault();
+        if (!photoFile) return alert("A live photo is required for outside check-in!");
+        
+        setUploading(true);
+        try {
+            const fileExt = photoFile.name.split('.').pop();
+            const fileName = `remote_${user.emp_id}_${Date.now()}.${fileExt}`;
+            const { error: uploadError } = await supabase.storage.from('attendance_docs').upload(fileName, photoFile);
+            
+            if (uploadError) throw uploadError;
+            
+            const { data } = supabase.storage.from('attendance_docs').getPublicUrl(fileName);
+            
+            setShowPhotoModal(false);
+            setPhotoFile(null);
+            
+            // ছবি আপলোড শেষে বায়োমেট্রিক + ডাটাবেজ ইনসার্ট
+            executeBiometricAuth(currentAction, null, null, data.publicUrl);
+            
+        } catch (err) {
+            alert("Error uploading photo. Try again.");
+        }
+        setUploading(false);
+    };
+
+    // 🔐 ৩. ফাইনাল বায়োমেট্রিক ও ডাটাবেজ সাবমিট
+    const executeBiometricAuth = async (action, lat = null, lng = null, photoUrl = null) => {
+        if (!window.PublicKeyCredential) return alert("Biometric not supported");
+        try {
+            const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
+            const options = { publicKey: { challenge, rp: { name: "LAMS" }, user: { id: Uint8Array.from(user.id, c => c.charCodeAt(0)), name: user.email, displayName: user.name }, pubKeyCredParams: [{ alg: -7, type: "public-key" }], authenticatorSelection: { authenticatorAttachment: "platform" }, timeout: 60000 } };
+            const credential = await navigator.credentials.create(options);
+            
+            if (credential) {
+                const now = new Date();
+                const dateStr = now.toLocaleDateString('en-CA');
+                const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+                
+                if (action === 'clock_in') {
+                    await supabase.from('attendance').insert([{ 
+                        emp_id: user.emp_id, name: user.name, date: dateStr, 
+                        time_in: timeStr, latitude: lat, longitude: lng, checkin_photo: photoUrl 
+                    }]);
+                } else {
+                    await supabase.from('attendance').update({ 
+                        time_out: timeStr, latitude: lat, longitude: lng 
+                    }).eq('emp_id', user.emp_id).eq('date', dateStr);
+                }
+                
+                fetchDashboardData();
+                alert(`Successfully ${action === 'clock_in' ? 'Checked-in' : 'Checked-out'}! ✅`);
+            }
+        } catch (err) { console.error(err); alert("Authentication Failed!"); }
+    };
+
+    // 📝 ৪. আউটসাইড রিকোয়েস্ট সাবমিট করা
+    const submitOutsideRequest = async (e) => {
+        e.preventDefault();
+        if (!reqDate || !reqPlace || !reqPurpose) return alert("Please fill all required fields!");
+        setUploading(true);
+        let fileUrl = null;
+
+        try {
+            if (photoFile) {
+                const fileName = `req_${user.emp_id}_${Date.now()}.${photoFile.name.split('.').pop()}`;
+                const { error: uploadError } = await supabase.storage.from('attendance_docs').upload(fileName, photoFile);
+                if (uploadError) throw uploadError;
+                const { data } = supabase.storage.from('attendance_docs').getPublicUrl(fileName);
+                fileUrl = data.publicUrl;
+            }
+
+            await supabase.from('outside_requests').insert([{
+                emp_id: user.emp_id, name: user.name, date: reqDate, purpose: reqPurpose, place: reqPlace, photo_url: fileUrl
+            }]);
+
+            setShowReqModal(false); setReqDate(''); setReqPlace(''); setReqPurpose(''); setPhotoFile(null);
+            alert("Request sent to Admin successfully! 📨");
+            fetchDashboardData();
+        } catch (error) { alert("Error submitting request"); }
+        setUploading(false);
+    };
+
+
+    if (loading) return <div className="h-screen flex items-center justify-center font-black text-slate-200 text-2xl animate-pulse tracking-[0.4em] uppercase">Lams Power</div>;
 
     return (
-        <div className="space-y-6 max-w-7xl mx-auto animate-[fadeIn_0.4s_ease-out]">
+        <div className="max-w-[1300px] mx-auto space-y-12 pb-24 px-4 animate-[fadeIn_0.5s_ease-out]">
             
-            {/* Top Grid (User Info, Clock, Session) */}
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                <div className="xl:col-span-2 bg-gradient-to-br from-slate-800 to-slate-900 rounded-[2.5rem] p-10 text-white shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[280px]">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/20 rounded-full blur-[80px] -mr-16 -mt-16"></div>
+            {/* 👑 PREMIUM HEADER */}
+            <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.03)] border border-slate-50 flex flex-col lg:flex-row justify-between items-center gap-12 relative overflow-hidden">
+                <div className="relative z-10 text-center lg:text-left">
+                    <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-300 mb-3 italic">Workspace Dashboard</p>
+                    <h1 className="text-4xl lg:text-6xl font-black text-slate-900 leading-[1.1] tracking-tighter">
+                        Assalamu Alaikum,<br/><span className="text-slate-400 italic font-normal">{user?.name}</span>
+                    </h1>
+                </div>
+                <div className="p-12 bg-slate-950 rounded-[3.5rem] shadow-2xl min-w-[320px] text-center relative overflow-hidden">
+                    <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
                     <div className="relative z-10">
-                        <span className="inline-block px-3 py-1 bg-white/10 rounded-full text-[10px] font-bold tracking-widest uppercase mb-4 text-orange-300">Overview</span>
-                        <h2 className="text-4xl font-extrabold tracking-tight mb-2">Hello, {user?.name?.split(' ')[0]}!</h2>
-                    </div>
-                    <div className="relative z-10 mt-8">
-                        <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1">Base Salary</p>
-                        <p className="text-3xl font-black text-white">{user?.basic_salary?.toLocaleString()} <span className="text-lg text-orange-500">BDT</span></p>
-                    </div>
-                </div>
-
-                <div className="bg-white/95 backdrop-blur-xl shadow-xl border border-slate-100 rounded-[2.5rem] p-8 flex flex-col items-center justify-center text-center">
-                    <h1 className="text-4xl font-black text-slate-800 mb-2 tracking-tighter">{currentTime}</h1>
-                    <div className="flex items-center gap-2 mt-2 bg-slate-100 px-4 py-1.5 rounded-full">
-                        <span className={`w-2.5 h-2.5 rounded-full ${todaysLog && !todaysLog.time_out ? 'bg-green-500 animate-pulse' : 'bg-slate-400'}`}></span>
-                        <span className={`text-[10px] font-bold uppercase tracking-widest ${todaysLog && !todaysLog.time_out ? 'text-green-600' : 'text-slate-500'}`}>
-                            {todaysLog && !todaysLog.time_out ? 'Active Session' : 'System Standby'}
-                        </span>
-                    </div>
-                </div>
-
-                <div className="xl:col-span-2 bg-white/95 backdrop-blur-xl shadow-xl border border-slate-100 rounded-[2.5rem] p-8 flex flex-col md:flex-row items-center justify-between gap-8">
-                    <div>
-                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Active Session</h3>
-                        <h1 className="text-4xl font-black text-slate-800 tracking-tighter">{workDuration}</h1>
-                    </div>
-                    <div className="flex gap-4 w-full md:w-auto justify-center">
-                        {!todaysLog ? (
-                            <button onClick={() => handleAttendance('clock_in')} disabled={loadingAction} className="bg-slate-900 hover:bg-slate-800 text-white px-10 py-4 rounded-2xl font-bold text-xs uppercase shadow-lg w-full md:w-auto transition-all disabled:opacity-50">
-                                {loadingAction ? 'Processing...' : 'Clock In'}
-                            </button>
-                        ) : !todaysLog.time_out ? (
-                            <button onClick={() => handleAttendance('clock_out')} disabled={loadingAction} className="bg-red-500 hover:bg-red-600 text-white px-10 py-4 rounded-2xl font-bold text-xs uppercase shadow-lg w-full md:w-auto transition-all disabled:opacity-50">
-                                {loadingAction ? 'Processing...' : 'Clock Out'}
-                            </button>
-                        ) : (
-                            <div className="w-full bg-slate-100 text-slate-400 px-10 py-4 rounded-2xl font-bold text-xs uppercase text-center cursor-not-allowed">Shift Completed</div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="bg-white/95 backdrop-blur-xl shadow-xl border border-slate-100 rounded-[2.5rem] p-8 row-span-2">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-tight">Holidays (Next 7 Days)</h3>
-                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                    </div>
-                    <div className="space-y-3 mb-8">
-                        {holidays.length === 0 ? (
-                            <div className="p-4 bg-slate-50 rounded-2xl text-center"><p className="text-[10px] font-bold text-slate-400 uppercase">No upcoming holidays</p></div>
-                        ) : (
-                            holidays.map((h, i) => (
-                                <div key={i} className="flex justify-between items-center bg-orange-50/50 border border-orange-100 p-4 rounded-2xl">
-                                    <span className="text-[11px] font-bold text-slate-700">{h.occasion}</span>
-                                    <span className="text-[10px] font-black text-orange-500 bg-white px-2 py-1 rounded-lg shadow-sm">{h.date.slice(5)}</span>
-                                </div>
-                            ))
-                        )}
-                    </div>
-                    <div className="border-t border-slate-100 pt-6">
-                        <div className="flex justify-between items-center mb-6">
-                            <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-tight">Notice Board</h3>
-                        </div>
-                        <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-                            {notices.length === 0 ? (
-                                <div className="p-4 bg-slate-50 rounded-2xl text-center"><p className="text-[10px] font-bold text-slate-400 uppercase">No notices</p></div>
-                            ) : (
-                                notices.map((n, i) => (
-                                    <div key={i} className="p-5 bg-white border border-slate-100 rounded-2xl shadow-sm">
-                                        <h4 className="font-bold text-slate-800 text-xs mb-1">{n.title}</h4>
-                                        <p className="text-[10px] text-slate-500 leading-relaxed">{n.message}</p>
-                                    </div>
-                                ))
-                            )}
-                        </div>
+                        <h2 className="text-6xl font-black text-white tracking-tighter">{currentTime}</h2>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-[0.5em] mt-4">Standard Time</p>
                     </div>
                 </div>
             </div>
 
-            {/* 📊 Admin Charts Section */}
-            {isAdmin && (
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-6">
-                    
-                    {/* Ratio Pie Chart */}
-                    <div className="bg-white shadow-xl border border-slate-100 rounded-[2.5rem] p-8 flex flex-col justify-center">
-                        <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-tight mb-6">Today's Attendance Ratio</h3>
-                        <div className="h-[200px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie data={attendanceStats} innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
-                                        {attendanceStats.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={entry.color} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }} />
-                                </PieChart>
-                            </ResponsiveContainer>
+            {/* 📊 ANALYTICS STATS */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                {isAdmin ? (
+                    <>
+                        <StatCard label="Total Force" value={stats.total} />
+                        <StatCard label="Live Now" value={stats.activeNow} isPositive />
+                        <StatCard label="Away Today" value={stats.absent} isNegative />
+                        <StatCard label="In Review" value={stats.leaves} isWarning />
+                    </>
+                ) : (
+                    <>
+                        <StatCard label="Present (This Month)" value={monthlyCount} isPositive />
+                        <StatCard label="Today's Status" value={todaysLog ? "Present" : "Absent"} isPositive={todaysLog} isNegative={!todaysLog} />
+                        <StatCard label="Profile Status" value="Active" />
+                        <StatCard label="Notices" value={notices.length} />
+                    </>
+                )}
+            </div>
+
+            {/* 🛡️ BIOMETRIC DUTY HUB */}
+            <div className="bg-slate-950 rounded-[3rem] p-10 md:p-14 flex flex-col md:flex-row items-center justify-between gap-10 shadow-2xl relative overflow-hidden group">
+                <div className="absolute inset-0 opacity-10 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
+                <div className="flex flex-col gap-4 relative z-10 w-full md:w-auto">
+                    <div className="flex items-center gap-8">
+                        <div className="w-20 h-20 bg-white/10 backdrop-blur-2xl rounded-[2rem] flex items-center justify-center border border-white/10 text-white text-3xl transition-transform group-hover:scale-110 duration-500">
+                            <i className="fa-solid fa-fingerprint animate-pulse"></i>
                         </div>
-                        <div className="flex justify-center gap-6 mt-4">
-                            <div className="text-center"><span className="w-3 h-3 inline-block rounded-full bg-[#10b981] mr-2"></span><span className="text-xs font-bold text-slate-600">Present ({attendanceStats[0]?.value || 0})</span></div>
-                            <div className="text-center"><span className="w-3 h-3 inline-block rounded-full bg-[#f43f5e] mr-2"></span><span className="text-xs font-bold text-slate-600">Absent ({attendanceStats[1]?.value || 0})</span></div>
+                        <div>
+                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mb-2 italic">Security Access</p>
+                            <h2 className="text-3xl font-black text-white tracking-tight uppercase">Duty Control</h2>
                         </div>
                     </div>
+                    {/* Outside Duty Request Button */}
+                    {!isAdmin && (
+                        <button onClick={() => setShowReqModal(true)} className="text-[10px] font-bold text-orange-400 uppercase hover:text-orange-300 transition-colors text-left flex items-center gap-2 mt-2">
+                            <i className="fa-solid fa-location-arrow"></i> Request Outside Duty
+                        </button>
+                    )}
+                </div>
 
-                    {/* Login Time Bar Chart */}
-                    <div className="xl:col-span-2 bg-white shadow-xl border border-slate-100 rounded-[2.5rem] p-8">
-                        <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-tight mb-6">Login Time Analysis</h3>
-                        {loginGraphData.length === 0 ? (
-                            <div className="h-[200px] flex items-center justify-center text-slate-400 font-bold text-sm">No one has clocked in yet today.</div>
-                        ) : (
-                            <div className="h-[220px] w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={loginGraphData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 'bold' }} />
-                                        <YAxis domain={[8, 18]} hide={true} /> {/* 8 AM to 6 PM mapping */}
-                                        <Tooltip cursor={{ fill: '#f8fafc' }} content={<CustomTooltip />} />
-                                        <Bar dataKey="hourVal" fill="#f97316" radius={[6, 6, 6, 6]} barSize={40} />
-                                    </BarChart>
-                                </ResponsiveContainer>
+                <div className="w-full md:w-auto relative z-10">
+                    {!todaysLog ? (
+                        <button onClick={() => handleDutyCheck('clock_in')} disabled={verifyingGeo} className="w-full md:w-72 py-6 bg-white text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:bg-slate-300">
+                            {verifyingGeo ? 'Checking Location...' : 'Verify & Check-in'}
+                        </button>
+                    ) : !todaysLog.time_out ? (
+                        <button onClick={() => handleDutyCheck('clock_out')} disabled={verifyingGeo} className="w-full md:w-72 py-6 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:bg-red-300">
+                            {verifyingGeo ? 'Checking Location...' : 'Verify & Check-out'}
+                        </button>
+                    ) : (
+                        <div className="w-full md:w-72 py-6 bg-white/5 border border-white/10 text-white/30 rounded-2xl font-black text-[10px] uppercase text-center tracking-widest italic">Duty Completed</div>
+                    )}
+                </div>
+            </div>
+
+            {/* 📢 BOARDS */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                <BoardCard title="Notice Board" icon="fa-bullhorn" color="text-orange-500" items={notices} type="notice" />
+                <BoardCard title="Upcoming Holidays" icon="fa-calendar-star" color="text-blue-500" items={holidays} type="holiday" />
+            </div>
+
+            {/* 📸 Modal: Outside Check-in Photo Upload */}
+            {showPhotoModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md px-4">
+                    <div className="bg-white w-full max-w-sm rounded-3xl p-8 relative">
+                        <button onClick={() => setShowPhotoModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-red-500 p-2"><i className="fa-solid fa-xmark text-xl"></i></button>
+                        <h3 className="text-xl font-black text-slate-900 text-center mb-2 uppercase">Remote Verification</h3>
+                        <p className="text-xs font-bold text-slate-500 text-center mb-6">A live photo is required to check-in from outside the office.</p>
+                        
+                        <form onSubmit={handleRemoteCheckinWithPhoto} className="space-y-4">
+                            <div className="p-4 bg-slate-50 border border-dashed border-slate-300 rounded-2xl text-center">
+                                <input type="file" accept="image/*" capture="user" onChange={e => setPhotoFile(e.target.files[0])} required className="text-xs font-bold text-slate-600 w-full file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-slate-900 file:text-white cursor-pointer" />
                             </div>
-                        )}
+                            <button type="submit" disabled={uploading} className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-xs uppercase tracking-wider shadow-lg active:scale-95 transition-all disabled:bg-slate-400">
+                                {uploading ? 'Uploading...' : 'Submit & Auth'}
+                            </button>
+                        </form>
                     </div>
                 </div>
             )}
 
+            {/* 📝 Modal: Outside Duty Request */}
+            {showReqModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md px-4">
+                    <div className="bg-white w-full max-w-md rounded-3xl p-8 relative animate-[fadeIn_0.3s_ease-out]">
+                        <button onClick={() => setShowReqModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-red-500 p-2"><i className="fa-solid fa-xmark text-xl"></i></button>
+                        <h3 className="text-2xl font-black text-slate-900 text-center mb-6">Outside Duty Request</h3>
+                        <form onSubmit={submitOutsideRequest} className="space-y-4">
+                            <input type="date" required value={reqDate} onChange={e => setReqDate(e.target.value)} className="w-full p-4 rounded-xl bg-slate-50 font-bold text-sm outline-none" />
+                            <input type="text" required placeholder="Location/Place" value={reqPlace} onChange={e => setReqPlace(e.target.value)} className="w-full p-4 rounded-xl bg-slate-50 font-bold text-sm outline-none" />
+                            <textarea required placeholder="Purpose of visit..." value={reqPurpose} onChange={e => setReqPurpose(e.target.value)} className="w-full p-4 rounded-xl bg-slate-50 font-medium text-sm outline-none" rows="3"></textarea>
+                            
+                            <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
+                                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Attachment (Optional)</label>
+                                <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files[0])} className="text-xs font-bold text-slate-600 w-full file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-slate-900 file:text-white cursor-pointer" />
+                            </div>
+
+                            <button type="submit" disabled={uploading} className="w-full bg-slate-950 text-white py-4 rounded-xl font-bold text-xs uppercase shadow-xl disabled:bg-slate-400">
+                                {uploading ? 'Submitting...' : 'Send Request'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Stats Card Component
+function StatCard({ label, value, isPositive, isNegative, isWarning }) {
+    return (
+        <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-lg transition-all">
+            <div className={`w-1 h-5 rounded-full mb-5 ${isPositive ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)]' : isNegative ? 'bg-red-500' : isWarning ? 'bg-orange-500' : 'bg-slate-200'}`}></div>
+            <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mb-2">{label}</p>
+            <p className="text-4xl font-black text-slate-900 tracking-tighter">{typeof value === 'number' ? value.toString().padStart(2, '0') : value}</p>
+        </div>
+    );
+}
+
+// Board Card Component
+function BoardCard({ title, icon, color, items, type }) {
+    return (
+        <div className="bg-white rounded-[2.5rem] p-10 border border-slate-50 shadow-sm min-h-[350px]">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-8 flex items-center gap-3">
+                <i className={`fa-solid ${icon} ${color}`}></i> {title}
+            </h3>
+            <div className="space-y-6">
+                {items.length > 0 ? items.map((item, idx) => (
+                    <div key={idx} className={`${type === 'notice' ? 'p-6 bg-slate-50 border-l-4 border-slate-950' : 'flex justify-between p-4 border-b border-slate-50'} rounded-2xl`}>
+                        {type === 'notice' ? (
+                            <>
+                                <p className="font-black text-slate-900 text-xs mb-1 uppercase tracking-tight">{item.title}</p>
+                                <p className="text-[10px] text-slate-500 font-medium">{item.message}</p>
+                            </>
+                        ) : (
+                            <>
+                                <span className="font-bold text-slate-800 text-xs">{item.occasion}</span>
+                                <span className="text-[9px] font-black uppercase text-slate-400">{item.date}</span>
+                            </>
+                        )}
+                    </div>
+                )) : <p className="text-[10px] font-bold text-slate-200 uppercase tracking-widest italic">No Data Sync</p>}
+            </div>
         </div>
     );
 }
