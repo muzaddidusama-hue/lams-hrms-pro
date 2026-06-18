@@ -15,10 +15,10 @@ export default function Layout({ user, onLogout }) {
     // 🚀 লাইভ ডাটাবেজ লিসেনার (ম্যাজিক!)
     useEffect(() => {
         if (isAdmin) {
-            // শুরুতে কয়টা পেন্ডিং ছুটি আছে তা গোনা
+            // শুরুতে কয়টা পেন্ডিং ছুটি আছে তা গোনা
             fetchPendingCount();
 
-            // Supabase Realtime: কেউ নতুন লিভ রিকোয়েস্ট করলে সাথে সাথে ধরবে
+            // Supabase Realtime: কেউ নতুন লিভ রিকোয়েস্ট করলে সাথে সাথে ধরবে
             const channel = supabase
                 .channel('realtime-leaves')
                 .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leaves' }, (payload) => {
@@ -47,6 +47,7 @@ export default function Layout({ user, onLogout }) {
         setTimeout(() => setToastMsg(''), 5000); // ৫ সেকেন্ড পর পপআপ চলে যাবে
     };
 
+    // 🛠️ ফিক্সড: এডমিন এবং এমপ্লয়ী উভয়ের জন্যই মিসিং মেনুগুলো অ্যাড করা হলো
     const navItems = isAdmin ? [
         { path: '/', icon: 'fa-house', label: 'Dashboard' }, 
         { path: '/team', icon: 'fa-users', label: 'Team Directory' }, 
@@ -54,10 +55,14 @@ export default function Layout({ user, onLogout }) {
         { path: '/leaves', icon: 'fa-paper-plane', label: 'Leave Requests', badge: pendingLeaves }, 
         { path: '/payroll', icon: 'fa-sack-dollar', label: 'Payroll' }, 
         { path: '/holidays', icon: 'fa-calendar-plus', label: 'Holidays' },
+        { path: '/notices', icon: 'fa-bullhorn', label: 'Noticeboard' }, // ✅ এডমিনদের নোটিশ অ্যাড করা হলো
         { path: '/profile', icon: 'fa-gear', label: 'Settings' }
     ] : [
         { path: '/', icon: 'fa-house', label: 'Home' }, 
+        { path: '/attendance', icon: 'fa-calendar-check', label: 'My Attendance' }, // ✅ এমপ্লয়ীদের এটেনডেন্স অ্যাড করা হলো
         { path: '/leaves', icon: 'fa-paper-plane', label: 'My Leaves' }, 
+        { path: '/holidays', icon: 'fa-calendar-plus', label: 'Holidays' }, // ✅ এমপ্লয়ীদের হলিডে অ্যাড করা হলো
+        { path: '/notices', icon: 'fa-bullhorn', label: 'Noticeboard' }, // ✅ এমপ্লয়ীদের নোটিশ অ্যাড করা হলো
         { path: '/payroll', icon: 'fa-sack-dollar', label: 'My Payslip' }, 
         { path: '/profile', icon: 'fa-user', label: 'My Profile' }
     ];

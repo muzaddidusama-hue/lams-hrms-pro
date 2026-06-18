@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { Geolocation } from '@capacitor/geolocation'; 
 
-// দূরত্ব মাপার গাণিতিক সূত্র (Haversine Formula)
 const getDistance = (lat1, lon1, lat2, lon2) => {
     if (!lat1 || !lon1 || !lat2 || !lon2) return 999999;
     const R = 6371e3; 
@@ -24,13 +23,11 @@ export default function Dashboard({ user }) {
     const [todaysLog, setTodaysLog] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    // Geo-fencing & Remote States
     const [geoConfig, setGeoConfig] = useState({ lat: 0, lng: 0, radius: 100 });
     const [isRemoteEmp, setIsRemoteEmp] = useState(false);
-    const [hasApprovedPass, setHasApprovedPass] = useState(false);
+    const [outsideReqStatus, setOutsideReqStatus] = useState(null); 
     const [verifyingGeo, setVerifyingGeo] = useState(false);
 
-    // Modals & Request Form States
     const [showReqModal, setShowReqModal] = useState(false);
     const [showPhotoModal, setShowPhotoModal] = useState(false);
     const [currentAction, setCurrentAction] = useState('');
@@ -40,7 +37,6 @@ export default function Dashboard({ user }) {
     const [reqPlace, setReqPlace] = useState('');
     const [reqPurpose, setReqPurpose] = useState('');
 
-    // 🛠️ ফিক্সড লজিক: Admin এবং User যেন আর কখনো গুলিয়ে না যায়!
     const currentUser = user || JSON.parse(localStorage.getItem('lams_user')) || {};
     const role = currentUser?.role?.toLowerCase() || "";
     const isAdmin = role === 'admin' || role === 'manager' || currentUser?.id === 'admin' || currentUser?.emp_id === 'emp110';
@@ -58,18 +54,16 @@ export default function Dashboard({ user }) {
             const todayStr = now.toLocaleDateString('en-CA');
             const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString('en-CA');
             
-            // Fetch Geo Config & Remote Status
             const [geoRes, profileRes, passRes] = await Promise.all([
                 supabase.from('company_settings').select('*').eq('id', 1).maybeSingle(),
                 supabase.from('employees').select('is_remote').eq('emp_id', empId).maybeSingle(),
-                supabase.from('outside_requests').select('status').eq('emp_id', empId).eq('date', todayStr).eq('status', 'Approved').maybeSingle()
+                supabase.from('outside_requests').select('status').eq('emp_id', empId).eq('date', todayStr).maybeSingle()
             ]);
 
             if (geoRes.data) setGeoConfig({ lat: geoRes.data.office_lat || 0, lng: geoRes.data.office_lng || 0, radius: geoRes.data.office_radius || 100 });
             if (profileRes.data) setIsRemoteEmp(profileRes.data.is_remote);
-            if (passRes.data) setHasApprovedPass(true);
+            if (passRes.data) setOutsideReqStatus(passRes.data.status); 
 
-            // Fetch Stats & Boards (Original Code)
             const [empRes, activeRes, totalPresentRes, noticeRes, holidayRes, leavesRes] = await Promise.all([
                 supabase.from('employees').select('*', { count: 'exact', head: true }),
                 supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('date', todayStr).is('time_out', null),
@@ -79,12 +73,7 @@ export default function Dashboard({ user }) {
                 supabase.from('leaves').select('*', { count: 'exact', head: true }).eq('status', 'Pending')
             ]);
 
-            setStats({ 
-                total: empRes.count || 0, 
-                activeNow: activeRes.count || 0, 
-                absent: Math.max(0, (empRes.count || 0) - (totalPresentRes.count || 0)), 
-                leaves: leavesRes.count || 0 
-            });
+            setStats({ total: empRes.count || 0, activeNow: activeRes.count || 0, absent: Math.max(0, (empRes.count || 0) - (totalPresentRes.count || 0)), leaves: leavesRes.count || 0 });
 
             if (!isAdmin) {
                 const { count } = await supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('emp_id', empId).gte('date', firstDay);
@@ -112,9 +101,11 @@ export default function Dashboard({ user }) {
             if (distance <= allowedRadius) {
                 executeBiometricAuth(action, lat, lng, null);
             } else {
-                if (isRemoteEmp || hasApprovedPass) {
+                if (isRemoteEmp || outsideReqStatus === 'Approved') {
                     setCurrentAction(action);
                     setShowPhotoModal(true); 
+                } else if (outsideReqStatus === 'Pending') {
+                    alert("Your Outside Duty Request is still Pending. Please wait for Admin approval.");
                 } else {
                     alert(`You are ${Math.round(distance)} meters away from the office! Please connect from the office or submit an 'Outside Duty Request'.`);
                 }
@@ -186,7 +177,6 @@ export default function Dashboard({ user }) {
     return (
         <div className="max-w-[1300px] mx-auto space-y-12 pb-24 px-4 animate-[fadeIn_0.5s_ease-out]">
             
-            {/* 👑 PREMIUM HEADER */}
             <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.03)] border border-slate-50 flex flex-col lg:flex-row justify-between items-center gap-12 relative overflow-hidden">
                 <div className="relative z-10 text-center lg:text-left">
                     <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-300 mb-3 italic">Workspace Dashboard</p>
@@ -201,7 +191,6 @@ export default function Dashboard({ user }) {
                 </div>
             </div>
 
-            {/* 📊 ANALYTICS STATS (আপনার অরিজিনাল কার্ডগুলো ঠিক রাখা হয়েছে) */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                 {isAdmin ? (
                     <>
@@ -220,7 +209,6 @@ export default function Dashboard({ user }) {
                 )}
             </div>
 
-            {/* 🛡️ BIOMETRIC DUTY HUB */}
             <div className="bg-slate-950 rounded-[3rem] p-10 md:p-14 flex flex-col md:flex-row items-center justify-between gap-10 shadow-2xl relative overflow-hidden group">
                 <div className="absolute inset-0 opacity-10 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]"></div>
                 <div className="flex flex-col gap-4 relative z-10 w-full md:w-auto">
@@ -228,28 +216,50 @@ export default function Dashboard({ user }) {
                         <div className="w-20 h-20 bg-white/10 backdrop-blur-2xl rounded-[2rem] flex items-center justify-center border border-white/10 text-white text-3xl transition-transform group-hover:scale-110 duration-500"><i className="fa-solid fa-fingerprint animate-pulse"></i></div>
                         <div><p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em] mb-2 italic">Security Access</p><h2 className="text-3xl font-black text-white tracking-tight uppercase">Duty Control</h2></div>
                     </div>
-                    {/* সবার জন্যই রিকোয়েস্ট বাটন রাখা হলো, যাতে কোনো অপশন মিসিং মনে না হয় */}
-                    <button onClick={() => setShowReqModal(true)} className="text-[10px] font-bold text-orange-400 uppercase hover:text-orange-300 transition-colors text-left flex items-center gap-2 mt-2"><i className="fa-solid fa-location-arrow"></i> Request Outside Duty</button>
                 </div>
 
-                <div className="w-full md:w-auto relative z-10">
+                {/* ✅ ডেস্কটপে পাশাপাশি এবং মোবাইলে নিচে নিচে বাটন */}
+                <div className="w-full md:w-auto relative z-10 flex flex-col md:flex-row gap-4">
+                    {/* মেইন বাটন */}
                     {!todaysLog ? (
-                        <button onClick={() => handleDutyCheck('clock_in')} disabled={verifyingGeo} className="w-full md:w-72 py-6 bg-white text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:bg-slate-300">{verifyingGeo ? 'Checking Location...' : 'Verify & Check-in'}</button>
+                        <button onClick={() => handleDutyCheck('clock_in')} disabled={verifyingGeo} className="w-full md:w-72 py-6 bg-white text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:bg-slate-300">{verifyingGeo ? 'Checking...' : 'Verify & Check-in'}</button>
                     ) : !todaysLog.time_out ? (
-                        <button onClick={() => handleDutyCheck('clock_out')} disabled={verifyingGeo} className="w-full md:w-72 py-6 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:bg-red-300">{verifyingGeo ? 'Checking Location...' : 'Verify & Check-out'}</button>
+                        <button onClick={() => handleDutyCheck('clock_out')} disabled={verifyingGeo} className="w-full md:w-72 py-6 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:bg-red-300">{verifyingGeo ? 'Checking...' : 'Verify & Check-out'}</button>
                     ) : (
-                        <div className="w-full md:w-72 py-6 bg-white/5 border border-white/10 text-white/30 rounded-2xl font-black text-[10px] uppercase text-center tracking-widest italic">Duty Completed</div>
+                        <div className="w-full md:w-72 py-6 bg-white/5 border border-white/10 text-white/30 rounded-2xl font-black text-[10px] uppercase text-center tracking-widest italic flex items-center justify-center">Duty Completed</div>
+                    )}
+
+                    {/* আউটসাইড ডিউটি বাটন */}
+                    {!isAdmin && !todaysLog?.time_out && (
+                        <>
+                            {outsideReqStatus === 'Pending' ? (
+                                <div className="w-full md:w-72 py-6 bg-orange-500 text-white rounded-2xl font-black text-[10px] uppercase text-center tracking-widest flex items-center justify-center gap-2 shadow-xl">
+                                    <i className="fa-solid fa-clock animate-pulse"></i> Pending Approval
+                                </div>
+                            ) : outsideReqStatus === 'Approved' ? (
+                                <div className="w-full md:w-72 py-6 bg-green-500 text-white rounded-2xl font-black text-[10px] uppercase text-center tracking-widest flex items-center justify-center gap-2 shadow-xl">
+                                    <i className="fa-solid fa-check-circle"></i> Outside Duty Approved
+                                </div>
+                            ) : outsideReqStatus === 'Rejected' ? (
+                                <button onClick={() => setShowReqModal(true)} className="w-full md:w-72 py-6 bg-red-500 hover:bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
+                                    <i className="fa-solid fa-rotate-right"></i> Rejected: Request Again
+                                </button>
+                            ) : (
+                                <button onClick={() => setShowReqModal(true)} className="w-full md:w-72 py-6 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
+                                    <i className="fa-solid fa-location-arrow"></i> Request Outside Duty
+                                </button>
+                            )}
+                        </>
                     )}
                 </div>
             </div>
 
-            {/* 📢 BOARDS (Notice & Holidays - Admin ও User সবার জন্যই ভিজিবল) */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
                 <BoardCard title="Notice Board" icon="fa-bullhorn" color="text-orange-500" items={notices} type="notice" />
                 <BoardCard title="Upcoming Holidays" icon="fa-calendar-star" color="text-blue-500" items={holidays} type="holiday" />
             </div>
 
-            {/* 📸 Modal: Outside Check-in Photo Upload */}
+            {/* 📸 Modal: Outside Check-in Photo Upload (Direct Camera) */}
             {showPhotoModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-md px-4">
                     <div className="bg-white w-full max-w-sm rounded-3xl p-8 relative">
@@ -258,9 +268,10 @@ export default function Dashboard({ user }) {
                         <p className="text-xs font-bold text-slate-500 text-center mb-6">A live photo is required to check-in from outside the office.</p>
                         <form onSubmit={handleRemoteCheckinWithPhoto} className="space-y-4">
                             <div className="p-4 bg-slate-50 border border-dashed border-slate-300 rounded-2xl text-center">
+                                {/* ✅ File input with capture to open camera directly */}
                                 <input type="file" accept="image/*" capture="user" onChange={e => setPhotoFile(e.target.files[0])} required className="text-xs font-bold text-slate-600 w-full file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-slate-900 file:text-white cursor-pointer" />
                             </div>
-                            <button type="submit" disabled={uploading} className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-xs uppercase tracking-wider shadow-lg active:scale-95 transition-all disabled:bg-slate-400">{uploading ? 'Uploading...' : 'Submit & Auth'}</button>
+                            <button type="submit" disabled={uploading} className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-xs uppercase tracking-wider shadow-lg active:scale-95 transition-all disabled:bg-slate-400">{uploading ? 'Processing...' : 'Take Photo & Auth'}</button>
                         </form>
                     </div>
                 </div>
@@ -277,8 +288,9 @@ export default function Dashboard({ user }) {
                             <input type="text" required placeholder="Location/Place" value={reqPlace} onChange={e => setReqPlace(e.target.value)} className="w-full p-4 rounded-xl bg-slate-50 font-bold text-sm outline-none" />
                             <textarea required placeholder="Purpose of visit..." value={reqPurpose} onChange={e => setReqPurpose(e.target.value)} className="w-full p-4 rounded-xl bg-slate-50 font-medium text-sm outline-none" rows="3"></textarea>
                             <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
-                                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Attachment (Optional)</label>
-                                <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files[0])} className="text-xs font-bold text-slate-600 w-full file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-slate-900 file:text-white cursor-pointer" />
+                                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Live Photo Proof</label>
+                                {/* ✅ Open camera directly for request as well */}
+                                <input type="file" accept="image/*" capture="environment" onChange={e => setPhotoFile(e.target.files[0])} className="text-xs font-bold text-slate-600 w-full file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-slate-900 file:text-white cursor-pointer" />
                             </div>
                             <button type="submit" disabled={uploading} className="w-full bg-slate-950 text-white py-4 rounded-xl font-bold text-xs uppercase shadow-xl disabled:bg-slate-400">{uploading ? 'Submitting...' : 'Send Request'}</button>
                         </form>
@@ -289,7 +301,6 @@ export default function Dashboard({ user }) {
     );
 }
 
-// StatCard Component
 function StatCard({ label, value, isPositive, isNegative, isWarning }) {
     return (
         <div className="bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-50 flex flex-col items-center text-center hover:shadow-lg transition-all">
@@ -300,7 +311,6 @@ function StatCard({ label, value, isPositive, isNegative, isWarning }) {
     );
 }
 
-// BoardCard Component
 function BoardCard({ title, icon, color, items, type }) {
     return (
         <div className="bg-white rounded-[2.5rem] p-10 border border-slate-50 shadow-sm min-h-[350px]">
