@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LAMS HR</string>
+    <string name="title_activity_main">LAMS HR</string>
+    <string name="package_name">com.lamspower.hrms</string>
+    <string name="custom_url_scheme">com.lamspower.hrms</string>
+</resources>

@@ -84,7 +84,26 @@ export default function Attendance({ user }) {
         } catch (err) { alert("Error updating request"); }
     };
 
-    if (loading) return <div className="h-screen flex items-center justify-center font-black text-slate-200 text-2xl animate-pulse tracking-[0.4em] uppercase">Syncing...</div>;
+    if (loading) {
+    return (
+        <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50">
+            <div className="relative flex items-center justify-center">
+                {/* বাইরের ঘূর্ণায়মান রিং */}
+                <div className="w-20 h-20 border-4 border-slate-200 border-t-orange-500 rounded-full animate-spin"></div>
+                {/* ভেতরের পালস আইকন */}
+                <div className="absolute text-slate-950 text-xl animate-pulse">
+                    <i className="fa-solid fa-bolt"></i>
+                </div>
+            </div>
+            <h2 className="mt-6 text-xs font-black text-slate-900 tracking-[0.5em] uppercase uppercase italic animate-pulse">
+                Lams Power
+            </h2>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                Syncing Secure Workspace...
+            </p>
+        </div>
+    );
+}
 
     // 👨‍💼 ================= REGULAR EMPLOYEE VIEW =================
     if (!isAdmin) {
