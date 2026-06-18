@@ -152,7 +152,7 @@ export default function Attendance({ user }) {
             <th className="p-6">Employee</th>
             <th className="p-6">Check In</th>
             <th className="p-6">Check Out</th>
-            <th className="p-6">Proof</th>
+            <th className="p-6">Remarks / Proof</th>
             <th className="p-6 text-right">Status</th>
         </tr>
     </thead>
@@ -166,13 +166,20 @@ export default function Attendance({ user }) {
                 <td className="p-6 font-mono text-xs text-slate-500">{log.time_in}</td>
                 <td className="p-6 font-mono text-xs text-slate-500">{log.time_out || '--:--'}</td>
                 <td className="p-6">
-                    {/* ✅ এখানে ছবির লিংক অ্যাড করা হয়েছে */}
+                    {/* ✅ ছবির লিংক */}
                     {log.checkin_photo ? (
-                        <a href={log.checkin_photo} target="_blank" rel="noreferrer" className="text-[10px] font-black text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-all">
-                            <i className="fa-solid fa-image"></i> Photo
+                        <a href={log.checkin_photo} target="_blank" rel="noreferrer" className="text-[10px] font-black text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-all mb-2">
+                            <i className="fa-solid fa-image"></i> View Proof
                         </a>
                     ) : (
-                        <span className="text-[10px] font-bold text-slate-300">-</span>
+                        <span className="text-[10px] font-bold text-slate-300 block mb-2">Office Auth</span>
+                    )}
+                    
+                    {/* ✅ আউটসাইড ডেসক্রিপশন (রিজন) */}
+                    {log.out_description && (
+                        <p className="text-[9px] text-orange-600 font-bold bg-orange-50 p-2 rounded-lg border border-orange-100 max-w-[180px] leading-tight shadow-sm">
+                            <i className="fa-solid fa-circle-info mr-1"></i> {log.out_description}
+                        </p>
                     )}
                 </td>
                 <td className="p-6 text-right">
