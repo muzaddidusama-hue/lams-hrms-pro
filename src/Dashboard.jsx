@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { Geolocation } from '@capacitor/geolocation'; 
 import { Capacitor } from '@capacitor/core';
-import { NativeBiometric } from 'capacitor-native-biometric'; // ✅ প্লাগইন ইম্পোর্ট ঠিক করা হয়েছে
+import { NativeBiometric } from 'capacitor-native-biometric';
+import Swal from 'sweetalert2';
 
 const getDistance = (lat1, lon1, lat2, lon2) => {
     if (!lat1 || !lon1 || !lat2 || !lon2) return 999999;
@@ -41,13 +42,25 @@ export default function Dashboard({ user }) {
 
     const currentUser = user || JSON.parse(localStorage.getItem('lams_user')) || {};
     const role = currentUser?.role?.toLowerCase() || "";
-    const isAdmin = role === 'admin' || role === 'manager' || currentUser?.id === 'admin' || currentUser?.emp_id === 'emp110';
+    const isManagerial = ['admin', 'ceo', 'manager'].some(r => role.includes(r)) || currentUser?.id === 'admin' || currentUser?.emp_id === 'emp110';
     const empId = currentUser?.emp_id || 'unknown';
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false })), 1000);
         fetchDashboardData();
-        return () => clearInterval(timer);
+
+        // 🚀 রিয়েল-টাইম ডাটা আপডেট (রিলোড ছাড়াই এপ্রুভাল দেখাবে)
+        const reqChannel = supabase
+            .channel('realtime-outside-reqs')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'outside_requests' }, () => {
+                fetchDashboardData(); // ব্যাকগ্রাউন্ডে ডাটা রিফ্রেশ
+            })
+            .subscribe();
+
+        return () => {
+            clearInterval(timer);
+            supabase.removeChannel(reqChannel);
+        };
     }, []);
 
     const fetchDashboardData = async () => {
@@ -77,7 +90,7 @@ export default function Dashboard({ user }) {
 
             setStats({ total: empRes.count || 0, activeNow: activeRes.count || 0, absent: Math.max(0, (empRes.count || 0) - (totalPresentRes.count || 0)), leaves: leavesRes.count || 0 });
 
-            if (!isAdmin) {
+            if (!isManagerial) {
                 const { count } = await supabase.from('attendance').select('*', { count: 'exact', head: true }).eq('emp_id', empId).gte('date', firstDay);
                 setMonthlyCount(count || 0);
             }
@@ -90,76 +103,68 @@ export default function Dashboard({ user }) {
         } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
+    // 🚀 GPS ভেরিফাই বাইপাস লজিক
     const handleDutyCheck = async (action) => {
+        if (outsideReqStatus === 'Pending') {
+            return Swal.fire({ title: 'Pending!', text: 'Your request is waiting for Admin approval.', icon: 'warning', confirmButtonColor: '#0f172a' });
+        }
+
+        // এপ্রুভ থাকলে সরাসরি ছবি ও ফিঙ্গারপ্রিন্ট চাইবে, জিপিএস চেক করবে না!
+        if (isRemoteEmp || outsideReqStatus === 'Approved') {
+            setCurrentAction(action);
+            setShowPhotoModal(true); 
+            return;
+        }
+
         setVerifyingGeo(true);
         try {
             const coordinates = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
             const lat = coordinates.coords.latitude;
             const lng = coordinates.coords.longitude;
-            
             const distance = getDistance(lat, lng, geoConfig.lat, geoConfig.lng);
             const allowedRadius = geoConfig.radius || 150; 
             
             if (distance <= allowedRadius) {
                 executeBiometricAuth(action, lat, lng, null);
             } else {
-                if (isRemoteEmp || outsideReqStatus === 'Approved') {
-                    setCurrentAction(action);
-                    setShowPhotoModal(true); 
-                } else if (outsideReqStatus === 'Pending') {
-                    alert("Your Outside Duty Request is still Pending. Please wait for approval.");
-                } else {
-                    alert(`You are ${Math.round(distance)} meters away from the office! Please connect from the office or submit an 'Outside Duty Request'.`);
-                }
+                Swal.fire({ title: 'Too Far!', text: `You are ${Math.round(distance)} meters away from the office!`, icon: 'error', confirmButtonColor: '#0f172a' });
             }
-        } catch (err) { alert("Turn on GPS/Location to check in!"); }
+        } catch (err) { Swal.fire({ title: 'GPS Error', text: 'Turn on GPS/Location to check in!', icon: 'error', confirmButtonColor: '#0f172a' }); }
         setVerifyingGeo(false);
     };
 
     const handleRemoteCheckinWithPhoto = async (e) => {
         e.preventDefault();
-        if (!photoFile) return alert("A live photo is required for outside check-in!");
+        if (!photoFile) return Swal.fire('Error', 'A live photo is required!', 'error');
         setUploading(true);
         try {
             const fileExt = photoFile.name.split('.').pop();
             const fileName = `remote_${empId}_${Date.now()}.${fileExt}`;
-            const { error: uploadError } = await supabase.storage.from('attendance_docs').upload(fileName, photoFile);
-            if (uploadError) throw uploadError;
+            await supabase.storage.from('attendance_docs').upload(fileName, photoFile);
             const { data } = supabase.storage.from('attendance_docs').getPublicUrl(fileName);
-            setShowPhotoModal(false); setPhotoFile(null);
+            
+            setShowPhotoModal(false); 
+            setPhotoFile(null);
             executeBiometricAuth(currentAction, null, null, data.publicUrl);
-        } catch (err) { alert("Error uploading photo. Try again."); }
+        } catch (err) { Swal.fire('Error', 'Error uploading photo. Try again.', 'error'); }
         setUploading(false);
     };
 
-    // 🚀 স্মার্ট বায়োমেট্রিক সিস্টেম (Native + Web)
     const executeBiometricAuth = async (action, lat = null, lng = null, photoUrl = null) => {
         try {
             let isAuthenticated = false;
 
             if (Capacitor.isNativePlatform()) {
-                // 📱 অ্যাপের জন্য নেটিভ ফিঙ্গারপ্রিন্ট
                 const available = await NativeBiometric.isAvailable();
-                if (!available.isAvailable) {
-                    return alert("Please setup screen lock or fingerprint on your phone first.");
-                }
+                if (!available.isAvailable) return Swal.fire('Security Alert', 'Please setup screen lock or fingerprint on your phone first.', 'warning');
                 
-                await NativeBiometric.verifyIdentity({
-                    reason: "Authenticate to record attendance",
-                    title: "LAMS Security",
-                    subtitle: "Verify your identity",
-                }).then(() => {
+                await NativeBiometric.verifyIdentity({ reason: "Authenticate to record attendance", title: "LAMS Security" }).then(() => {
                     isAuthenticated = true;
-                }).catch(() => {
-                    isAuthenticated = false;
-                });
-
+                }).catch(() => { isAuthenticated = false; });
             } else {
-                // 🌐 ওয়েবসাইটের জন্য WebAuthn
-                if (!window.PublicKeyCredential) return alert("Biometric not supported on this device/browser.");
+                if (!window.PublicKeyCredential) return Swal.fire('Error', 'Biometric not supported on this device/browser.', 'error');
                 const challenge = new Uint8Array(32); window.crypto.getRandomValues(challenge);
-                const options = { publicKey: { challenge, rp: { name: "LAMS" }, user: { id: Uint8Array.from(currentUser?.id || 'default_id', c => c.charCodeAt(0)), name: currentUser?.email || 'user', displayName: currentUser?.name || 'user' }, pubKeyCredParams: [{ alg: -7, type: "public-key" }], authenticatorSelection: { authenticatorAttachment: "platform" }, timeout: 60000 } };
-                const credential = await navigator.credentials.create(options);
+                const credential = await navigator.credentials.create({ publicKey: { challenge, rp: { name: "LAMS" }, user: { id: Uint8Array.from(empId, c => c.charCodeAt(0)), name: currentUser.name, displayName: currentUser.name }, pubKeyCredParams: [{ alg: -7, type: "public-key" }], authenticatorSelection: { authenticatorAttachment: "platform" }, timeout: 60000 } });
                 if (credential) isAuthenticated = true;
             }
 
@@ -167,67 +172,44 @@ export default function Dashboard({ user }) {
                 const now = new Date();
                 const dateStr = now.toLocaleDateString('en-CA');
                 const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+                
                 if (action === 'clock_in') {
-                    await supabase.from('attendance').insert([{ emp_id: currentUser.emp_id, name: currentUser.name, date: dateStr, time_in: timeStr, latitude: lat, longitude: lng, checkin_photo: photoUrl }]);
+                    await supabase.from('attendance').insert([{ emp_id: empId, name: currentUser.name, date: dateStr, time_in: timeStr, latitude: lat, longitude: lng, checkin_photo: photoUrl }]);
                 } else {
-                    await supabase.from('attendance').update({ time_out: timeStr, latitude: lat, longitude: lng }).eq('emp_id', currentUser.emp_id).eq('date', dateStr);
+                    await supabase.from('attendance').update({ time_out: timeStr, latitude: lat, longitude: lng }).eq('emp_id', empId).eq('date', dateStr);
                 }
                 fetchDashboardData();
-                alert(`Successfully ${action === 'clock_in' ? 'Checked-in' : 'Checked-out'}! ✅`);
-            } else {
-                alert("Authentication Failed or Canceled!");
+                Swal.fire({ title: 'Success!', text: `Successfully ${action === 'clock_in' ? 'Checked-in' : 'Checked-out'}! ✅`, icon: 'success', confirmButtonColor: '#0f172a' });
             }
-        } catch (err) { 
-            console.error(err); 
-            alert("Authentication Error!"); 
-        }
+        } catch (err) { Swal.fire('Canceled', 'Authentication Failed or Canceled!', 'error'); }
     };
 
     const submitOutsideRequest = async (e) => {
         e.preventDefault();
-        if (!reqDate || !reqPlace || !reqPurpose) return alert("Please fill all required fields!");
         setUploading(true);
-        let fileUrl = null;
         try {
-            if (photoFile) {
-                const fileName = `req_${empId}_${Date.now()}.${photoFile.name.split('.').pop()}`;
-                const { error: uploadError } = await supabase.storage.from('attendance_docs').upload(fileName, photoFile);
-                if (uploadError) throw uploadError;
-                const { data } = supabase.storage.from('attendance_docs').getPublicUrl(fileName);
-                fileUrl = data.publicUrl;
-            }
-            await supabase.from('outside_requests').insert([{ emp_id: currentUser.emp_id, name: currentUser.name, date: reqDate, purpose: reqPurpose, place: reqPlace, photo_url: fileUrl }]);
-            setShowReqModal(false); setReqDate(''); setReqPlace(''); setReqPurpose(''); setPhotoFile(null);
-            alert("Request sent successfully! 📨");
+            await supabase.from('outside_requests').insert([{ emp_id: empId, name: currentUser.name, date: reqDate, purpose: reqPurpose, place: reqPlace }]);
+            setShowReqModal(false); setReqDate(''); setReqPlace(''); setReqPurpose('');
+            Swal.fire({ title: 'Sent!', text: 'Request sent to Admin successfully! 📨', icon: 'success', confirmButtonColor: '#0f172a' });
             fetchDashboardData();
-        } catch (error) { alert("Error submitting request"); }
+        } catch (error) { Swal.fire('Error', 'Failed to submit request.', 'error'); }
         setUploading(false);
     };
 
     if (loading) {
-    return (
-        <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50">
-            <div className="relative flex items-center justify-center">
-                {/* বাইরের ঘূর্ণায়মান রিং */}
-                <div className="w-20 h-20 border-4 border-slate-200 border-t-orange-500 rounded-full animate-spin"></div>
-                {/* ভেতরের পালস আইকন */}
-                <div className="absolute text-slate-950 text-xl animate-pulse">
-                    <i className="fa-solid fa-bolt"></i>
+        return (
+            <div className="h-screen w-full flex flex-col items-center justify-center bg-slate-50">
+                <div className="relative flex items-center justify-center">
+                    <div className="w-20 h-20 border-4 border-slate-200 border-t-orange-500 rounded-full animate-spin"></div>
+                    <div className="absolute text-slate-950 text-xl animate-pulse"><i className="fa-solid fa-bolt"></i></div>
                 </div>
+                <h2 className="mt-6 text-xs font-black text-slate-900 tracking-[0.5em] uppercase italic animate-pulse">Lams Power</h2>
             </div>
-            <h2 className="mt-6 text-xs font-black text-slate-900 tracking-[0.5em] uppercase uppercase italic animate-pulse">
-                Lams Power
-            </h2>
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">
-                Syncing Secure Workspace...
-            </p>
-        </div>
-    );
-}
+        );
+    }
 
     return (
         <div className="max-w-[1300px] mx-auto space-y-12 pb-24 px-4 animate-[fadeIn_0.5s_ease-out]">
-            
             <div className="bg-white rounded-[3.5rem] p-10 md:p-16 shadow-[0_30px_60px_rgba(0,0,0,0.03)] border border-slate-50 flex flex-col lg:flex-row justify-between items-center gap-12 relative overflow-hidden">
                 <div className="relative z-10 text-center lg:text-left">
                     <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-300 mb-3 italic">Workspace Dashboard</p>
@@ -243,7 +225,7 @@ export default function Dashboard({ user }) {
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                {isAdmin ? (
+                {isManagerial ? (
                     <>
                         <StatCard label="Total Force" value={stats.total} />
                         <StatCard label="Live Now" value={stats.activeNow} isPositive />
@@ -270,28 +252,28 @@ export default function Dashboard({ user }) {
                 </div>
 
                 <div className="w-full md:w-auto relative z-10 flex flex-col md:flex-row gap-4">
+                    {/* 🚀 স্মার্ট চেক-ইন বাটন (এপ্রুভ হলে অটোমেটিক আউটসাইড চেক-ইন লেখা আসবে) */}
                     {!todaysLog ? (
-                        <button onClick={() => handleDutyCheck('clock_in')} disabled={verifyingGeo} className="w-full md:w-72 py-6 bg-white text-slate-950 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:bg-slate-300">{verifyingGeo ? 'Checking...' : 'Verify & Check-in'}</button>
+                        <button onClick={() => handleDutyCheck('clock_in')} disabled={verifyingGeo} className={`w-full md:w-72 py-6 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all ${outsideReqStatus === 'Approved' ? 'bg-green-500 text-white animate-pulse' : 'bg-white text-slate-950 disabled:bg-slate-300'}`}>
+                            {verifyingGeo ? 'Checking...' : outsideReqStatus === 'Approved' ? 'Outside Check-in' : 'Verify & Check-in'}
+                        </button>
                     ) : !todaysLog.time_out ? (
-                        <button onClick={() => handleDutyCheck('clock_out')} disabled={verifyingGeo} className="w-full md:w-72 py-6 bg-red-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all disabled:bg-red-300">{verifyingGeo ? 'Checking...' : 'Verify & Check-out'}</button>
+                        <button onClick={() => handleDutyCheck('clock_out')} disabled={verifyingGeo} className={`w-full md:w-72 py-6 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all ${outsideReqStatus === 'Approved' ? 'bg-green-500 text-white' : 'bg-red-500 text-white disabled:bg-red-300'}`}>
+                            {verifyingGeo ? 'Checking...' : outsideReqStatus === 'Approved' ? 'Outside Check-out' : 'Verify & Check-out'}
+                        </button>
                     ) : (
                         <div className="w-full md:w-72 py-6 bg-white/5 border border-white/10 text-white/30 rounded-2xl font-black text-[10px] uppercase text-center tracking-widest italic flex items-center justify-center">Duty Completed</div>
                     )}
 
-                    {/* ✅ এডমিনসহ সবার জন্যই আউটসাইড ডিউটি বাটন ওপেন করা হয়েছে */}
-                    {!todaysLog?.time_out && (
+                    {!todaysLog?.time_out && outsideReqStatus !== 'Approved' && (
                         <>
                             {outsideReqStatus === 'Pending' ? (
                                 <div className="w-full md:w-72 py-6 bg-orange-500 text-white rounded-2xl font-black text-[10px] uppercase text-center tracking-widest flex items-center justify-center gap-2 shadow-xl">
-                                    <i className="fa-solid fa-clock animate-pulse"></i> Pending Approval
-                                </div>
-                            ) : outsideReqStatus === 'Approved' ? (
-                                <div className="w-full md:w-72 py-6 bg-green-500 text-white rounded-2xl font-black text-[10px] uppercase text-center tracking-widest flex items-center justify-center gap-2 shadow-xl">
-                                    <i className="fa-solid fa-check-circle"></i> Outside Duty Approved
+                                    <i className="fa-solid fa-clock animate-pulse"></i> Request Pending
                                 </div>
                             ) : outsideReqStatus === 'Rejected' ? (
                                 <button onClick={() => setShowReqModal(true)} className="w-full md:w-72 py-6 bg-red-500 hover:bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
-                                    <i className="fa-solid fa-rotate-right"></i> Rejected: Request Again
+                                    <i className="fa-solid fa-rotate-right"></i> Request Again
                                 </button>
                             ) : (
                                 <button onClick={() => setShowReqModal(true)} className="w-full md:w-72 py-6 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2">
@@ -333,10 +315,6 @@ export default function Dashboard({ user }) {
                             <input type="date" required value={reqDate} onChange={e => setReqDate(e.target.value)} className="w-full p-4 rounded-xl bg-slate-50 font-bold text-sm outline-none" />
                             <input type="text" required placeholder="Location/Place" value={reqPlace} onChange={e => setReqPlace(e.target.value)} className="w-full p-4 rounded-xl bg-slate-50 font-bold text-sm outline-none" />
                             <textarea required placeholder="Purpose of visit..." value={reqPurpose} onChange={e => setReqPurpose(e.target.value)} className="w-full p-4 rounded-xl bg-slate-50 font-medium text-sm outline-none" rows="3"></textarea>
-                            <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
-                                <label className="block text-[10px] font-black uppercase text-slate-400 tracking-wider">Live Photo Proof</label>
-                                <input type="file" accept="image/*" capture="environment" onChange={e => setPhotoFile(e.target.files[0])} className="text-xs font-bold text-slate-600 w-full file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-[10px] file:font-black file:uppercase file:bg-slate-900 file:text-white cursor-pointer" />
-                            </div>
                             <button type="submit" disabled={uploading} className="w-full bg-slate-950 text-white py-4 rounded-xl font-bold text-xs uppercase shadow-xl disabled:bg-slate-400">{uploading ? 'Submitting...' : 'Send Request'}</button>
                         </form>
                     </div>
