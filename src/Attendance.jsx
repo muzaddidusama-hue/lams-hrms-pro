@@ -147,20 +147,41 @@ export default function Attendance({ user }) {
                     
                     <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
                         <table className="w-full text-left">
-                            <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                                <tr><th className="p-6">Employee</th><th className="p-6">Check In</th><th className="p-6">Check Out</th><th className="p-6 text-right">Status</th></tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-50">
-                                {logs.length > 0 ? logs.map((log, idx) => (
-                                    <tr key={idx} className="hover:bg-slate-50 transition-all font-bold">
-                                        <td className="p-6"><p className="text-xs text-slate-900">{log.name}</p><p className="text-[9px] text-slate-400 uppercase mt-1">{log.date}</p></td>
-                                        <td className="p-6 font-mono text-xs text-slate-500">{log.time_in}</td>
-                                        <td className="p-6 font-mono text-xs text-slate-500">{log.time_out || '--:--'}</td>
-                                        <td className="p-6 text-right"><span className={`text-[9px] font-black px-3 py-1 rounded-lg uppercase ${log.time_out ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-500 animate-pulse'}`}>{log.time_out ? 'Finished' : 'On Duty'}</span></td>
-                                    </tr>
-                                )) : <tr><td colSpan="4" className="p-10 text-center font-bold text-slate-300 uppercase text-xs italic">No Logs Found</td></tr>}
-                            </tbody>
-                        </table>
+    <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">
+        <tr>
+            <th className="p-6">Employee</th>
+            <th className="p-6">Check In</th>
+            <th className="p-6">Check Out</th>
+            <th className="p-6">Proof</th>
+            <th className="p-6 text-right">Status</th>
+        </tr>
+    </thead>
+    <tbody className="divide-y divide-slate-50">
+        {logs.length > 0 ? logs.map((log, idx) => (
+            <tr key={idx} className="hover:bg-slate-50 transition-all font-bold">
+                <td className="p-6">
+                    <p className="text-xs text-slate-900">{log.name}</p>
+                    <p className="text-[9px] text-slate-400 uppercase mt-1">{log.date}</p>
+                </td>
+                <td className="p-6 font-mono text-xs text-slate-500">{log.time_in}</td>
+                <td className="p-6 font-mono text-xs text-slate-500">{log.time_out || '--:--'}</td>
+                <td className="p-6">
+                    {/* ✅ এখানে ছবির লিংক অ্যাড করা হয়েছে */}
+                    {log.checkin_photo ? (
+                        <a href={log.checkin_photo} target="_blank" rel="noreferrer" className="text-[10px] font-black text-blue-500 hover:text-blue-700 flex items-center gap-1 transition-all">
+                            <i className="fa-solid fa-image"></i> Photo
+                        </a>
+                    ) : (
+                        <span className="text-[10px] font-bold text-slate-300">-</span>
+                    )}
+                </td>
+                <td className="p-6 text-right">
+                    <span className={`text-[9px] font-black px-3 py-1 rounded-lg uppercase ${log.time_out ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-500 animate-pulse'}`}>{log.time_out ? 'Finished' : 'On Duty'}</span>
+                </td>
+            </tr>
+        )) : <tr><td colSpan="5" className="p-10 text-center font-bold text-slate-300 uppercase text-xs italic">No Logs Found</td></tr>}
+    </tbody>
+</table>
                     </div>
                 </div>
             )}
